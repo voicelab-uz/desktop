@@ -128,7 +128,7 @@
     "@ai-sdk/groq": "^3.0.29",
     "@ai-sdk/openai": "^3.0.41",
     "@ai-sdk/provider": "^3.0.14",
-    "@aws-sdk/client-bedrock": "^3.1090.0",
+    "@aws-sdk/client-bedrock": "^3.1114.0",
     "@aws-sdk/credential-providers": "^3.1029.0",
     "@homebridge/dbus-native": "^0.7.7",
     "@radix-ui/react-accordion": "^1.1.2",
