@@ -132,6 +132,8 @@ test("manual and tag releases resolve immutable version provenance", () => {
 });
 
 test("promotion uses GitHub CLI's atomic asset upload and publication flow", () => {
+  const promotion = release.slice(release.indexOf("  promote-release:"));
+  assert.match(promotion, /actions\/checkout@v5[\s\S]*?fetch-depth: 0/);
   const createIndex = release.indexOf('gh release create "$TAG" "${assets[@]}"');
   const countIndex = release.indexOf("actual_count=");
   assert.ok(createIndex > 0);

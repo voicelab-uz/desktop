@@ -413,6 +413,7 @@ jobs:
     steps:
       - uses: actions/checkout@v5
         with:
+          fetch-depth: 0
           ref: ${{ needs.validate-release.outputs.source_sha }}
 
       - uses: actions/setup-node@v5
