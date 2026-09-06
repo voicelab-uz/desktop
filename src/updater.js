@@ -28,6 +28,7 @@ class UpdateManager {
     this.eventListeners = [];
     this.updateCheckInterval = null;
     this.windowManager = null;
+    this.authManager = null;
     this._suppressNotification = false;
     this.nativeUpdateNotification = null;
 
@@ -36,6 +37,10 @@ class UpdateManager {
 
   setWindowManager(windowManager) {
     this.windowManager = windowManager;
+  }
+
+  setAuthManager(authManager) {
+    this.authManager = authManager;
   }
 
   areNativeUpdateNotificationsEnabled() {
@@ -425,6 +430,21 @@ class UpdateManager {
 
       this.isInstalling = true;
       console.log("🔄 Installing update and restarting...");
+
+      // A background token refresh can be mid-flight right when someone clicks
+      // Install & Restart. Refresh tokens are single-use, so if we quit before
+      // the new one lands on disk, the relaunched app comes back up holding a
+      // token the server already burned - that's a permanent "session expired",
+      // not something a retry can fix. Let anything in flight finish first, and
+      // stop new ones from starting during the quit sequence that follows.
+      this.authManager?.suspendBackgroundRefresh?.();
+      if (this.authManager?.refreshPromise) {
+        try {
+          await this.authManager.refreshPromise;
+        } catch (error) {
+          console.warn("Token refresh didn't finish before quitting for update:", error);
+        }
+      }
 
       const isSilent = process.platform === "win32";
       autoUpdater.quitAndInstall(isSilent, true);

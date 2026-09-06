@@ -306,6 +306,18 @@ class DesktopAuthManager extends EventEmitter {
     this.refreshRetryAttempt = 0;
     this.bootstrapPromise = null;
     this.authEpoch = 0;
+    this._suspended = false;
+  }
+
+  // Called right before the app quits to install an update. Refresh tokens
+  // are single-use, so a proactive or retry timer that fires during the quit
+  // sequence and starts its own exchange is racing whatever the relaunched
+  // app does on its own first launch. Neither side can tell it's losing until
+  // the server rejects it, so it's simpler to just not start one here.
+  suspendBackgroundRefresh() {
+    this._suspended = true;
+    this._clearAccessRefreshTimer();
+    this._clearRefreshRetryTimer();
   }
 
   _advanceAuthEpoch() {
@@ -329,7 +341,9 @@ class DesktopAuthManager extends EventEmitter {
   }
 
   _scheduleRefreshRetry(retryAfterSeconds = null) {
-    if (this.refreshRetryTimer || !tokenStore.getSession()?.refreshToken) return;
+    if (this._suspended || this.refreshRetryTimer || !tokenStore.getSession()?.refreshToken) {
+      return;
+    }
     const retryAfterMs = Number.isFinite(retryAfterSeconds)
       ? Math.max(1_000, Math.min(retryAfterSeconds * 1000, REFRESH_RETRY_MAX_MS))
       : null;
@@ -371,6 +385,7 @@ class DesktopAuthManager extends EventEmitter {
   _scheduleAccessTokenRefresh(session = tokenStore.getSession()) {
     this._clearAccessRefreshTimer();
     if (
+      this._suspended ||
       !session?.refreshToken ||
       !Number.isFinite(session.accessExpiresAt) ||
       session.accessExpiresAt <= 0
