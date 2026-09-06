@@ -22,6 +22,32 @@ test("new installations show onboarding before the live reauthentication gate", 
   assert.ok(authGate > -1 && authGate < dashboard, "auth gate must render before dashboard");
 });
 
+test("a pending update stays reachable from the sign-in gate", () => {
+  const router = read("src/AppRouter.jsx");
+
+  // Update IPC never checks auth state (see registerUpdateIpc.js). Being
+  // signed out should never mean losing the only way to reach an update.
+  const authGate = router.indexOf("isControlPanel && authLoaded && !isSignedIn");
+  const banner = router.indexOf("<UpdateAvailableBanner");
+  const authStep = router.indexOf("<AuthenticationStep");
+  const nextBranch = router.indexOf("return isControlPanel ? (");
+  assert.ok(banner > -1, "the auth gate must render UpdateAvailableBanner");
+  assert.ok(
+    authGate < banner && banner < authStep && authStep < nextBranch,
+    "the banner must render inside the sign-in gate branch, not elsewhere"
+  );
+
+  const onboarding = router.slice(
+    router.indexOf("isControlPanel && showOnboarding"),
+    authGate
+  );
+  assert.doesNotMatch(
+    onboarding,
+    /<UpdateAvailableBanner/,
+    "onboarding is a first-run flow - nudging a brand-new user to update mid-setup is noise, not the gap this fixes"
+  );
+});
+
 test("browser sign-in starts only after an explicit user action", () => {
   const authentication = read("src/components/AuthenticationStep.tsx");
 

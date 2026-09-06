@@ -23,6 +23,21 @@ interface UpdateState {
   error: Error | null;
 }
 
+export type PrimaryUpdateAction = "install" | "download" | null;
+
+// The one rule for "what should clicking the update button do right now" -
+// every surface that offers an update action (the sidebar, Settings, the
+// sign-in screen) reads this instead of re-deriving it, so the two can't
+// silently drift as update states change.
+export function primaryUpdateAction(
+  status: UpdateStatus,
+  isDownloading: boolean
+): PrimaryUpdateAction {
+  if (status.updateDownloaded) return "install";
+  if (status.updateAvailable && !isDownloading) return "download";
+  return null;
+}
+
 let globalState: UpdateState = {
   status: {
     updateAvailable: false,

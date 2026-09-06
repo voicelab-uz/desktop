@@ -10,7 +10,7 @@ import { ConfirmDialog, AlertDialog } from "./ui/dialog";
 import { useDialogs } from "../hooks/useDialogs";
 import { useHotkey } from "../hooks/useHotkey";
 import { useToast } from "./ui/useToast";
-import { useUpdater } from "../hooks/useUpdater";
+import { useUpdater, primaryUpdateAction } from "../hooks/useUpdater";
 import { useAuth } from "../hooks/useAuth";
 import { useUsage } from "../hooks/useUsage";
 import { useCollapsibleSidebar } from "../hooks/useCollapsibleSidebar";
@@ -562,7 +562,8 @@ export default function ControlPanel({ initialSettingsSection }: ControlPanelPro
   }, [loadTranscriptions, showDiscarded]);
 
   const handleUpdateClick = async () => {
-    if (updateStatus.updateDownloaded) {
+    const action = primaryUpdateAction(updateStatus, isDownloading);
+    if (action === "install") {
       showConfirmDialog({
         title: t("controlPanel.update.installTitle"),
         description: t("controlPanel.update.installDescription"),
@@ -578,7 +579,7 @@ export default function ControlPanel({ initialSettingsSection }: ControlPanelPro
           }
         },
       });
-    } else if (updateStatus.updateAvailable && !isDownloading) {
+    } else if (action === "download") {
       try {
         await downloadUpdate();
       } catch (error) {
