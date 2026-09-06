@@ -11,6 +11,7 @@ import { useAuth } from "./hooks/useAuth";
 import { useTheme } from "./hooks/useTheme";
 import ConnectionStatus from "./components/ConnectionStatus";
 import WelcomeGreeting from "./components/WelcomeGreeting.tsx";
+import UpdateAvailableBanner from "./components/UpdateAvailableBanner.tsx";
 import { hasOnboardingProgress } from "./constants/onboarding";
 
 const ControlPanel = React.lazy(() => import("./components/ControlPanel.tsx"));
@@ -154,6 +155,10 @@ function MainApp() {
         </div>
         <div className="flex-1 px-6 overflow-y-auto flex items-center">
           <div className="w-full max-w-sm mx-auto">
+            {/* Being signed out never blocks updating - none of the update IPC
+                depends on auth. Surfacing it here is what makes that actually
+                true in practice, for anyone stuck on this screen. */}
+            <UpdateAvailableBanner />
             <Card className="border border-border bg-card shadow-sm">
               <CardContent className="p-6">
                 <AuthenticationStep onAuthComplete={() => {}} onNeedsVerification={() => {}} />
