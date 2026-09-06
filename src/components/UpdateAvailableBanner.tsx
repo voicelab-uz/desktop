@@ -1,5 +1,5 @@
 import { useTranslation } from "react-i18next";
-import { useUpdater } from "../hooks/useUpdater";
+import { useUpdater, primaryUpdateAction } from "../hooks/useUpdater";
 import { useToast } from "./ui/useToast";
 import { Button } from "./ui/button";
 
@@ -21,27 +21,28 @@ export default function UpdateAvailableBanner() {
   if (!hasUpdate) return null;
 
   const handleClick = async () => {
-    if (status.updateDownloaded) {
+    const action = primaryUpdateAction(status, isDownloading);
+    if (action === "install") {
       try {
         await installUpdate();
-      } catch {
+      } catch (error) {
         toast({
           title: t("controlPanel.update.couldNotInstallTitle"),
           description: t("controlPanel.update.couldNotInstallDescription"),
           variant: "destructive",
         });
+        console.error("Failed to install update from sign-in screen:", error);
       }
-      return;
-    }
-    if (!isDownloading) {
+    } else if (action === "download") {
       try {
         await downloadUpdate();
-      } catch {
+      } catch (error) {
         toast({
           title: t("controlPanel.update.couldNotDownloadTitle"),
           description: t("controlPanel.update.couldNotDownloadDescription"),
           variant: "destructive",
         });
+        console.error("Failed to download update from sign-in screen:", error);
       }
     }
   };
