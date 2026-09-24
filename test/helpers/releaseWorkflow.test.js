@@ -183,6 +183,16 @@ test("macOS verification maps the Node x64 name to the Mach-O x86_64 architectur
   assert.match(release, /grep -Fx "\$expected_macho_arch"/);
 });
 
+test("macOS packaging reuses the verified signing keychain without a second certificate import", () => {
+  const mac = release.slice(release.indexOf("  build-macos:"), release.indexOf("  build-linux:"));
+  assert.match(mac, /echo "CSC_KEYCHAIN=\$keychain_path" >> "\$GITHUB_ENV"/);
+  assert.doesNotMatch(mac, /echo "CSC_LINK=/);
+  assert.doesNotMatch(mac, /CSC_KEY_PASSWORD:/);
+  assert.match(mac, /security find-identity -v -p codesigning "\$keychain_path"/);
+  assert.match(mac, /forceCodeSigning=true/);
+  assert.match(mac, /codesign --verify --deep --strict/);
+});
+
 test("macOS helper compilation and verification cover the release target architecture", () => {
   assert.match(release, /Compile native helpers\n\s+env:\n\s+TARGET_ARCH: \$\{\{ matrix.arch \}\}/);
   assert.match(release, /for helper in[^\n]*macos-mic-listener[^\n]*macos-text-monitor/);
