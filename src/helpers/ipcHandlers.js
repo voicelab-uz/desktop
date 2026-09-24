@@ -176,9 +176,17 @@ class IPCHandlers {
             })
           : handler
       );
+    this.databaseManager.setAccountProvider?.(() =>
+      this.desktopAuthManager?.getPublicStatus?.().status === "authenticated"
+        ? this.desktopAuthManager.getSessionMetadata().accountId
+        : null
+    );
     this._authGeneration = 0;
+    const { AccountDataContext } = require("./accountDataContext");
+    this.historyAccountContext = new AccountDataContext(this.desktopAuthManager);
     this.desktopAuthManager?.on?.("status", (status) => {
       this._authGeneration += 1;
+      this.historyAccountContext.handleAuthStatus();
       const store = this.databaseManager.getDesktopSyncStore();
       store.pause();
       this.voiceLabApiClient?.handleAuthStatus?.(status);
@@ -802,6 +810,21 @@ class IPCHandlers {
     this._handle("get-recording-island-support", () => supportsRecordingIsland());
 
     this._handle("db-save-transcription", async (event, text, rawText, options) => {
+      if (this.databaseManager._activePrivacyScope() === "signed-out") {
+        return { success: false, code: "AUTH_REQUIRED" };
+      }
+      if (
+        !options?.accountId ||
+        `account:${options.accountId}` !== this.databaseManager._activePrivacyScope()
+      ) {
+        return { success: false, code: "AUTH_ACCOUNT_CHANGED" };
+      }
+      if (
+        options?.desktopTranscriptionId &&
+        this.databaseManager.isDesktopTranscriptionHidden(options.desktopTranscriptionId)
+      ) {
+        return { success: false, code: "TRANSCRIPTION_REMOVED" };
+      }
       const result = this.databaseManager.saveTranscription(text, rawText, options);
       if (result?.success && result?.transcription) {
         this.databaseManager
@@ -818,8 +841,11 @@ class IPCHandlers {
       return this.databaseManager.getTranscriptions(limit, options);
     });
 
+    const captureHistoryContext = () => this.historyAccountContext.capture();
     const desktopErrorCode = (error) =>
-      String(error?.code || error?.details?.error?.code || error?.details?.code || "").toUpperCase();
+      String(
+        error?.code || error?.details?.error?.code || error?.details?.code || ""
+      ).toUpperCase();
     const persistDesktopTranscription = (record) => {
       const { audioUrl: _audioUrl, requestId: _requestId, ...stableRecord } = record;
       // `audioUrl` is a ten-minute capability URL and must not reach SQLite.
@@ -829,23 +855,34 @@ class IPCHandlers {
       if (!transcription) return;
       setImmediate(() => this.broadcastToWindows("transcription-updated", transcription));
     };
-    const removeMissingDesktopTranscription = (desktopTranscriptionId) => {
+    const removeMissingDesktopTranscription = (desktopTranscriptionId, assertContext) => {
+      assertContext();
+      const privacyScope = this.databaseManager._activePrivacyScope();
       const removed = this.databaseManager.removeDesktopTranscriptionById(desktopTranscriptionId);
       if (removed.success) {
-        setImmediate(() => this.broadcastToWindows("transcription-deleted", { id: removed.id }));
+        setImmediate(() =>
+          this.broadcastToWindows("transcription-deleted", {
+            id: removed.id,
+            privacy_scope_id: privacyScope,
+          })
+        );
       }
       return removed;
     };
 
     this._handle("desktop-list-transcriptions", async (_event, page = 1, pageSize = 50) => {
+      const assertContext = captureHistoryContext();
       try {
         if (!this.voiceLabApiClient) throw new Error("VoiceLab client unavailable");
         const result = await this.voiceLabApiClient.listDesktopTranscriptions({ page, pageSize });
-        const transcriptions = result.items.map((item) => {
-          const transcription = persistDesktopTranscription(item);
-          broadcastDesktopTranscription(transcription);
-          return transcription;
-        });
+        assertContext();
+        const transcriptions = result.items
+          .map((item) => {
+            const transcription = persistDesktopTranscription(item);
+            broadcastDesktopTranscription(transcription);
+            return transcription;
+          })
+          .filter(Boolean);
         return {
           success: true,
           transcriptions,
@@ -857,30 +894,42 @@ class IPCHandlers {
       } catch (error) {
         return typeof error?.toPublic === "function"
           ? error.toPublic()
-          : { success: false, error: "Saved dictations are unavailable.", code: "SERVICE_UNAVAILABLE" };
+          : {
+              success: false,
+              error: "Saved dictations are unavailable.",
+              code: "SERVICE_UNAVAILABLE",
+            };
       }
     });
 
     this._handle("desktop-get-transcription", async (_event, desktopTranscriptionId) => {
+      const assertContext = captureHistoryContext();
       try {
         if (!this.voiceLabApiClient) throw new Error("VoiceLab client unavailable");
         const result = await this.voiceLabApiClient.getDesktopTranscription(desktopTranscriptionId);
+        assertContext();
         const transcription = persistDesktopTranscription(result);
         broadcastDesktopTranscription(transcription);
+        if (!transcription) return { success: false, code: "DESKTOP_TRANSCRIPTION_NOT_FOUND" };
         return { success: true, transcription, audioUrl: result.audioUrl || null };
       } catch (error) {
         if (desktopErrorCode(error) === "DESKTOP_TRANSCRIPTION_NOT_FOUND") {
-          removeMissingDesktopTranscription(desktopTranscriptionId);
+          removeMissingDesktopTranscription(desktopTranscriptionId, assertContext);
         }
         return typeof error?.toPublic === "function"
           ? error.toPublic()
-          : { success: false, error: "Saved dictation is unavailable.", code: "SERVICE_UNAVAILABLE" };
+          : {
+              success: false,
+              error: "Saved dictation is unavailable.",
+              code: "SERVICE_UNAVAILABLE",
+            };
       }
     });
 
     this._handle(
       "desktop-update-transcription",
       async (_event, desktopTranscriptionId, transcript, expectedRevision) => {
+        const assertContext = captureHistoryContext();
         try {
           if (!this.voiceLabApiClient) throw new Error("VoiceLab client unavailable");
           const result = await this.voiceLabApiClient.updateDesktopTranscription(
@@ -888,14 +937,18 @@ class IPCHandlers {
             transcript,
             expectedRevision
           );
+          assertContext();
           const updated = persistDesktopTranscription(result);
+          if (!updated) return { success: false, code: "DESKTOP_TRANSCRIPTION_NOT_FOUND" };
           broadcastDesktopTranscription(updated);
           return { success: true, transcription: updated };
         } catch (error) {
           const code = desktopErrorCode(error);
           if (code === "DESKTOP_TRANSCRIPT_CONFLICT") {
             try {
-              const newer = await this.voiceLabApiClient.getDesktopTranscription(desktopTranscriptionId);
+              const newer =
+                await this.voiceLabApiClient.getDesktopTranscription(desktopTranscriptionId);
+              assertContext();
               const transcription = persistDesktopTranscription(newer);
               broadcastDesktopTranscription(transcription);
               return {
@@ -905,7 +958,10 @@ class IPCHandlers {
               };
             } catch (refreshError) {
               if (desktopErrorCode(refreshError) === "DESKTOP_TRANSCRIPTION_NOT_FOUND") {
-                const removed = removeMissingDesktopTranscription(desktopTranscriptionId);
+                const removed = removeMissingDesktopTranscription(
+                  desktopTranscriptionId,
+                  assertContext
+                );
                 return {
                   success: false,
                   code: "DESKTOP_TRANSCRIPTION_NOT_FOUND",
@@ -914,11 +970,18 @@ class IPCHandlers {
               }
               return typeof refreshError?.toPublic === "function"
                 ? refreshError.toPublic()
-                : { success: false, error: "Saved dictation is unavailable.", code: "SERVICE_UNAVAILABLE" };
+                : {
+                    success: false,
+                    error: "Saved dictation is unavailable.",
+                    code: "SERVICE_UNAVAILABLE",
+                  };
             }
           }
           if (code === "DESKTOP_TRANSCRIPTION_NOT_FOUND") {
-            const removed = removeMissingDesktopTranscription(desktopTranscriptionId);
+            const removed = removeMissingDesktopTranscription(
+              desktopTranscriptionId,
+              assertContext
+            );
             return { success: false, code, removed: removed.success };
           }
           if (Number(error?.status) === 422 || code === "VALIDATION_ERROR") {
@@ -926,19 +989,24 @@ class IPCHandlers {
           }
           return typeof error?.toPublic === "function"
             ? error.toPublic()
-            : { success: false, error: "Saved dictation is unavailable.", code: "SERVICE_UNAVAILABLE" };
+            : {
+                success: false,
+                error: "Saved dictation is unavailable.",
+                code: "SERVICE_UNAVAILABLE",
+              };
         }
       }
     );
 
     this._handle("db-clear-transcriptions", async (event) => {
-      this.databaseManager.getDesktopSyncStore().deleteAllLocalTranscripts();
-      this.audioStorageManager.deleteAllAudio();
+      const privacyScope = this.databaseManager._activePrivacyScope();
       const result = this.databaseManager.clearTranscriptions();
+      for (const id of result.ids || []) this.audioStorageManager.deleteAudio(id);
       if (result?.success) {
         setImmediate(() => {
           this.broadcastToWindows("transcriptions-cleared", {
             cleared: result.cleared,
+            privacy_scope_id: privacyScope,
           });
         });
       }
@@ -952,7 +1020,8 @@ class IPCHandlers {
     // Audio storage handlers
     const saveWavRecording = async (event, id, audioBuffer, metadata) => {
       const transcription = this.databaseManager.getTranscriptionById(id);
-      const timestamp = transcription?.timestamp || null;
+      if (!transcription) return { success: false, code: "TRANSCRIPTION_NOT_FOUND" };
+      const timestamp = transcription.timestamp || null;
       const boundedAudio = toBoundedAudioBuffer(
         audioBuffer,
         MAX_STORED_AUDIO_BYTES,
@@ -980,10 +1049,12 @@ class IPCHandlers {
     this._handle("save-transcription-audio", saveWavRecording);
 
     this._handle("get-audio-path", async (event, id) => {
+      if (!this.databaseManager.getTranscriptionById(id)) return null;
       return this.audioStorageManager.getAudioPath(id);
     });
 
     this._handle("show-audio-in-folder", async (event, id) => {
+      if (!this.databaseManager.getTranscriptionById(id)) return { success: false };
       const filePath = this.audioStorageManager.getAudioPath(id);
       if (!filePath) return { success: false };
       shell.showItemInFolder(filePath);
@@ -991,6 +1062,7 @@ class IPCHandlers {
     });
 
     this._handle("get-audio-buffer", async (event, id) => {
+      if (!this.databaseManager.getTranscriptionById(id)) return null;
       const buffer = this.audioStorageManager.getAudioBuffer(id);
       if (!buffer) return null;
       const { toExactArrayBuffer } = require("./bufferTransfer");
@@ -998,6 +1070,7 @@ class IPCHandlers {
     });
 
     this._handle("delete-transcription-audio", async (event, id) => {
+      if (!this.databaseManager.getTranscriptionById(id)) return { success: false };
       const result = this.audioStorageManager.deleteAudio(id);
       if (result.success) {
         this.databaseManager.updateTranscriptionAudio(id, {
@@ -1015,22 +1088,10 @@ class IPCHandlers {
     });
 
     this._handle("delete-all-audio", async () => {
-      const result = this.audioStorageManager.deleteAllAudio();
-      try {
-        const rows = this.databaseManager.db
-          .prepare("SELECT id FROM transcriptions WHERE has_audio = 1")
-          .all();
-        if (rows.length > 0) {
-          this.databaseManager.clearAudioFlags(rows.map((r) => r.id));
-        }
-      } catch (error) {
-        debugLogger.error(
-          "Failed to clear audio flags after delete-all",
-          { error: error.message },
-          "audio-storage"
-        );
-      }
-      return result;
+      const rows = this.databaseManager.getTranscriptions(2147483647, { includeDiscarded: true });
+      for (const row of rows) this.audioStorageManager.deleteAudio(row.id);
+      this.databaseManager.clearAudioFlags(rows.map((row) => row.id));
+      return { success: true };
     });
 
     this._handle("get-transcription-by-id", async (event, id) => {
@@ -3004,6 +3065,9 @@ class IPCHandlers {
       signal,
     }) => {
       if (!this.voiceLabApiClient) throw new Error("VoiceLab client unavailable");
+      const assertContext = captureHistoryContext();
+      const accountId = this.desktopAuthManager?.getSessionMetadata?.().accountId;
+      assertContext();
       let operation = null;
       try {
         operation = await this.voiceLabApiClient.beginDictation({
@@ -3020,8 +3084,9 @@ class IPCHandlers {
           signal,
         });
         const response = await this.voiceLabApiClient.publicResult(result, operation.operationId);
+        assertContext();
         this.voiceLabApiClient.finishDictation(operation);
-        return { ...response, clientTranscriptionId: operation.operationId };
+        return { ...response, clientTranscriptionId: operation.operationId, accountId };
       } catch (error) {
         if (operation) this.voiceLabApiClient.failDictation(operation, error);
         throw error;
@@ -3029,6 +3094,16 @@ class IPCHandlers {
     };
 
     this._handle("cloud-transcribe", async (event, audioBuffer, opts = {}) => {
+      if (
+        !opts.accountId ||
+        `account:${opts.accountId}` !== this.databaseManager._activePrivacyScope()
+      ) {
+        return {
+          success: false,
+          code: "AUTH_ACCOUNT_CHANGED",
+          error: "The active account changed during recording.",
+        };
+      }
       const requestId =
         typeof opts.requestId === "string" &&
         /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(opts.requestId)
@@ -3097,6 +3172,9 @@ class IPCHandlers {
     });
 
     this._handle("retry-transcription", async (_event, id, settings) => {
+      const assertContext = captureHistoryContext();
+      if (!this.databaseManager.getTranscriptionById(id))
+        return { success: false, error: "Transcription not found" };
       const buffer = this.audioStorageManager.getAudioBuffer(id);
       if (!buffer) return { success: false, error: "Audio file not found" };
       try {
@@ -3121,6 +3199,7 @@ class IPCHandlers {
           return { success: false, error: "No transcription engine available" };
         }
 
+        assertContext();
         this.databaseManager.updateTranscriptionText(id, result.text, result.text);
         this.databaseManager.updateTranscriptionStatus(id, "completed");
         const providerName = result.sttProvider || "voicelab";
@@ -7230,21 +7309,24 @@ class IPCHandlers {
   }
 
   deleteTranscriptionInternal(id) {
-    this.databaseManager.getDesktopSyncStore().deleteLocalTranscript(id);
-    this.audioStorageManager.deleteAudio(id);
+    const privacyScope = this.databaseManager._activePrivacyScope();
     const result = this.databaseManager.deleteTranscription(id);
     if (result?.success) {
+      this.audioStorageManager.deleteAudio(id);
       setImmediate(() => {
-        this.broadcastToWindows("transcription-deleted", { id });
+        this.broadcastToWindows("transcription-deleted", { id, privacy_scope_id: privacyScope });
       });
     }
     return result;
   }
 
   deleteNoteInternal(id) {
+    const privacyScope = this.databaseManager._activePrivacyScope();
     const result = this.databaseManager.deleteNote(id);
     if (result?.success) {
-      setImmediate(() => this.broadcastToWindows("note-deleted", { id }));
+      setImmediate(() =>
+        this.broadcastToWindows("note-deleted", { id, privacy_scope_id: privacyScope })
+      );
       this._asyncVectorDelete(id);
       this._asyncMirrorDelete(id);
     }
@@ -7252,6 +7334,19 @@ class IPCHandlers {
   }
 
   broadcastToWindows(channel, payload) {
+    if (
+      [
+        "transcription-added",
+        "transcription-updated",
+        "transcriptions-cleared",
+        "transcription-deleted",
+        "note-added",
+        "note-updated",
+        "note-deleted",
+      ].includes(channel) &&
+      payload?.privacy_scope_id !== this.databaseManager._activePrivacyScope()
+    )
+      return;
     const windows = BrowserWindow.getAllWindows();
     windows.forEach((win) => {
       if (!win.isDestroyed()) {

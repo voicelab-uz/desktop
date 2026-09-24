@@ -182,3 +182,22 @@ test("macOS verification maps the Node x64 name to the Mach-O x86_64 architectur
   );
   assert.match(release, /grep -Fx "\$expected_macho_arch"/);
 });
+
+test("macOS helper compilation and verification cover the release target architecture", () => {
+  assert.match(release, /Compile native helpers\n\s+env:\n\s+TARGET_ARCH: \$\{\{ matrix.arch \}\}/);
+  assert.match(release, /for helper in[^\n]*macos-mic-listener[^\n]*macos-text-monitor/);
+  assert.match(release, /lipo -archs "\$app_path\/Contents\/Resources\/bin\/\$helper"/);
+  const script = fs.readFileSync(path.join(root, "scripts/build-text-monitor.js"), "utf8");
+  const calls = [];
+  require("node:vm").runInNewContext(script, {
+    require: (name) =>
+      name === "child_process" ? { execFileSync: (...args) => calls.push(args) } : require(name),
+    process: { platform: "darwin", argv: ["node", "build-text-monitor.js", "--arch", "x64"] },
+    __dirname: path.join(root, "scripts"),
+  });
+  assert.deepEqual(Array.from(calls[0][1]), [
+    path.join(root, "scripts/build-macos-text-monitor.js"),
+    "--arch",
+    "x64",
+  ]);
+});

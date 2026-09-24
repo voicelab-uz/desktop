@@ -14,5 +14,7 @@ const scripts = {
 
 const script = scripts[process.platform];
 if (script) {
-  execFileSync("node", [path.join(__dirname, script)], { stdio: "inherit" });
+  execFileSync("node", [path.join(__dirname, script), ...process.argv.slice(2)], {
+    stdio: "inherit",
+  });
 }

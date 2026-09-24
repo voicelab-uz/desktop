@@ -14,7 +14,7 @@ test("new installations show onboarding before the live reauthentication gate", 
 
   const authGate = router.indexOf("isControlPanel && authLoaded && !isSignedIn");
   const onboarding = router.indexOf("isControlPanel && showOnboarding");
-  const dashboard = router.indexOf("<ControlPanel initialSettingsSection=");
+  const dashboard = router.indexOf("<ControlPanel");
   assert.ok(
     onboarding > -1 && onboarding < authGate,
     "onboarding must render before the auth gate"

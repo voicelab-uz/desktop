@@ -377,6 +377,10 @@ export interface UpdateStatusResult {
   updateAvailable: boolean;
   updateDownloaded: boolean;
   isDevelopment: boolean;
+  isDownloading?: boolean;
+  isInstalling?: boolean;
+  downloadProgress?: number;
+  info?: UpdateInfoResult | null;
 }
 
 export interface UpdateInfoResult {
@@ -546,6 +550,7 @@ declare global {
           errorMessage?: string | null;
           errorCode?: TranscriptionErrorCode;
           clientTranscriptionId?: string;
+          accountId?: string | null;
           desktopTranscriptionId?: string | null;
           desktopRevision?: number | null;
           desktopAudioAvailable?: boolean;
@@ -1610,7 +1615,9 @@ declare global {
         oneOnOneAttendee?: { displayName: string; email: string | null } | null;
       }>;
       meetingTranscriptionSend?: (buffer: ArrayBuffer, source: "mic" | "system") => void;
-      meetingTranscriptionSetSystemAudioEnabled?: (enabled: boolean) => Promise<{ success: boolean }>;
+      meetingTranscriptionSetSystemAudioEnabled?: (
+        enabled: boolean
+      ) => Promise<{ success: boolean }>;
       meetingTranscriptionStop?: () => Promise<{
         success: boolean;
         transcript?: string;

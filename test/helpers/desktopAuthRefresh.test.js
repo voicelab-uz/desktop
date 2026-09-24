@@ -208,7 +208,7 @@ test("refresh preserves a rotated credential when no display profile can be rest
   assert.equal(getSession().refreshToken, `refresh-new-${"n".repeat(40)}`);
 });
 
-test("an expired local refresh credential is retained for background recovery", async () => {
+test("an expired local refresh credential returns to sign-in without retrying", async () => {
   const expiredSession = {
     ...initialSession(),
     refreshExpiresAt: Date.now() - 1,
@@ -221,17 +221,19 @@ test("an expired local refresh credential is retained for background recovery", 
     (error) => error.code === "AUTH_EXPIRED"
   );
 
-  assert.equal(getSession().refreshToken, expiredSession.refreshToken);
+  assert.equal(getSession(), null);
+  assert.equal(manager.refreshRetryTimer, null);
+  assert.equal(manager.accessRefreshTimer, null);
   assert.deepEqual(
     {
       status: manager.getPublicStatus().status,
       errorCode: manager.getPublicStatus().errorCode,
     },
-    { status: "authenticated", errorCode: "AUTH_EXPIRED" }
+    { status: "signed-out", errorCode: "AUTH_EXPIRED" }
   );
 });
 
-test("invalid_refresh_token preserves the desktop session and retries safely", async (t) => {
+test("invalid_refresh_token clears the rejected session and returns to sign-in", async (t) => {
   const originalFetch = global.fetch;
   t.after(() => {
     global.fetch = originalFetch;
@@ -253,16 +255,12 @@ test("invalid_refresh_token preserves the desktop session and retries safely", a
     assert.equal(error.requestId, "req_invalid_refresh");
     return true;
   });
-  assert.equal(getSession().refreshToken, `refresh-old-${"r".repeat(40)}`);
-  assert.ok(manager.refreshRetryTimer);
+  assert.equal(getSession(), null);
+  assert.equal(manager.refreshRetryTimer, null);
+  assert.equal(manager.accessRefreshTimer, null);
   assert.deepEqual(manager.getPublicStatus(), {
-    status: "authenticated",
-    user: {
-      id: "7",
-      email: "desktop@example.com",
-      name: "desktop@example.com",
-      image: null,
-    },
+    status: "signed-out",
+    user: null,
     errorCode: "invalid_refresh_token",
     errorMessage: "The refresh token is invalid or expired.",
     errorRequestId: "req_invalid_refresh",
@@ -678,4 +676,196 @@ test("a new authorization supersedes an in-flight refresh without overwriting it
   await assert.rejects(refresh, (error) => error.code === "AUTH_OPERATION_SUPERSEDED");
   assert.equal(getSession().accessToken, session.accessToken);
   assert.equal(manager.getPublicStatus().status, "waiting-for-browser");
+});
+
+function captureTimers(t) {
+  const timers = [];
+  t.mock.method(global, "setTimeout", (callback, delay) => {
+    const timer = { callback, delay, active: true, unref() {} };
+    timers.push(timer);
+    return timer;
+  });
+  t.mock.method(global, "clearTimeout", (timer) => {
+    if (timer) timer.active = false;
+  });
+  return {
+    active: () => timers.filter((timer) => timer.active),
+    fire(timer) {
+      timer.active = false;
+      timer.callback();
+    },
+  };
+}
+
+test("expired access retries honor Retry-After without proactive or demand refresh bypass", async (t) => {
+  const timers = captureTimers(t);
+  const session = { ...initialSession(), accessExpiresAt: Date.now() - 1 };
+  const { DesktopAuthManager, getSession } = loadDesktopAuthManager(session);
+  const manager = managerFrom(DesktopAuthManager);
+  let requests = 0;
+  t.mock.method(global, "fetch", async () => {
+    requests += 1;
+    if (requests === 1) {
+      return new Response(JSON.stringify({ error: { code: "rate_limited" } }), {
+        status: 429,
+        headers: { "Content-Type": "application/json", "Retry-After": "600" },
+      });
+    }
+    return jsonResponse({
+      access_token: "renewed-access-abcdefghijklmnopqrstuvwxyz",
+      refresh_token: "renewed-refresh-abcdefghijklmnopqrstuvwxyz",
+    });
+  });
+
+  await assert.rejects(manager.refreshSession({ force: true }));
+  assert.deepEqual(
+    timers.active().map((timer) => timer.delay),
+    [600_000]
+  );
+  assert.equal(manager.accessRefreshTimer, null);
+  assert.equal(getSession().refreshToken, session.refreshToken);
+  await assert.rejects(manager.getValidAccessToken());
+  await assert.rejects(manager.refreshSession({ force: true }));
+  assert.equal(requests, 1);
+
+  timers.fire(timers.active()[0]);
+  await manager.refreshPromise;
+  assert.equal(requests, 2);
+  assert.equal(manager.getPublicStatus().errorCode, null);
+  assert.equal(getSession().refreshToken, "renewed-refresh-abcdefghijklmnopqrstuvwxyz");
+  assert.equal(manager.refreshRetryTimer, null);
+  assert.equal(timers.active().length, 1);
+  assert.ok(timers.active()[0].delay > 13 * 60_000);
+});
+
+test("transient refresh failures back off without a second proactive timer", async (t) => {
+  const timers = captureTimers(t);
+  const { DesktopAuthManager } = loadDesktopAuthManager({
+    ...initialSession(),
+    accessExpiresAt: Date.now() - 1,
+  });
+  const manager = managerFrom(DesktopAuthManager);
+  t.mock.method(global, "fetch", async () => {
+    throw new Error("offline");
+  });
+  await assert.rejects(manager.refreshSession({ force: true }));
+  assert.deepEqual(
+    timers.active().map((timer) => timer.delay),
+    [5_000]
+  );
+  timers.fire(timers.active()[0]);
+  await assert.rejects(manager.refreshPromise);
+  assert.deepEqual(
+    timers.active().map((timer) => timer.delay),
+    [10_000]
+  );
+});
+
+test("bootstrap with a revoked refresh token stays signed out", async (t) => {
+  const timers = captureTimers(t);
+  const { DesktopAuthManager, getSession } = loadDesktopAuthManager(initialSession());
+  const manager = managerFrom(DesktopAuthManager);
+  t.mock.method(global, "fetch", async () =>
+    jsonResponse(
+      {
+        error: { code: "invalid_refresh_token" },
+      },
+      401
+    )
+  );
+  assert.equal((await manager.initialize()).status, "signed-out");
+  assert.equal(getSession(), null);
+  assert.deepEqual(timers.active(), []);
+});
+
+for (const [body, contentType] of [
+  ["<html>Gateway access denied</html>", "text/html"],
+  ["invalid-json", "application/json"],
+  ["", "application/json"],
+]) {
+  test(`gateway 403 preserves refresh credentials for ${body || "empty response"}`, async (t) => {
+    const timers = captureTimers(t);
+    const session = { ...initialSession(), accessExpiresAt: Date.now() - 1 };
+    const { DesktopAuthManager, getSession } = loadDesktopAuthManager(session);
+    const manager = managerFrom(DesktopAuthManager);
+    t.mock.method(
+      global,
+      "fetch",
+      async () =>
+        new Response(body, {
+          status: 403,
+          headers: { "Content-Type": contentType },
+        })
+    );
+    await assert.rejects(manager.refreshSession({ force: true }));
+    assert.equal(getSession().refreshToken, session.refreshToken);
+    assert.equal(manager.getPublicStatus().status, "authenticated");
+    assert.deepEqual(
+      timers.active().map((timer) => timer.delay),
+      [5_000]
+    );
+  });
+}
+
+test("shutdown drains a rotating token before allowing exit and blocks new refreshes", async (t) => {
+  const timers = captureTimers(t);
+  const { DesktopAuthManager, getSession } = loadDesktopAuthManager(initialSession());
+  const manager = managerFrom(DesktopAuthManager);
+  let resolveFetch;
+  let requests = 0;
+  t.mock.method(global, "fetch", () => {
+    requests += 1;
+    return new Promise((resolve) => {
+      resolveFetch = resolve;
+    });
+  });
+  const refresh = manager.refreshSession({ force: true });
+  let drained = false;
+  const drain = manager.drainRefreshForShutdown().then(() => {
+    drained = true;
+  });
+  const joined = manager.refreshSession({ force: true });
+  await Promise.resolve();
+  assert.equal(drained, false);
+  assert.equal(requests, 1);
+  resolveFetch(
+    jsonResponse({
+      access_token: "shutdown-access-abcdefghijklmnopqrstuvwxyz",
+      refresh_token: "shutdown-refresh-abcdefghijklmnopqrstuvwxyz",
+    })
+  );
+  await Promise.all([refresh, joined, drain]);
+  assert.equal(getSession().refreshToken, "shutdown-refresh-abcdefghijklmnopqrstuvwxyz");
+  assert.deepEqual(timers.active(), []);
+  await assert.rejects(manager.refreshSession({ force: true }), { code: "AUTH_REFRESH_SUSPENDED" });
+  manager.resumeBackgroundRefresh();
+  assert.equal(timers.active().length, 1);
+  assert.ok(timers.active()[0].delay > 13 * 60_000);
+});
+
+test("shutdown drain finishes on the bounded request timeout and failed install can resume", async (t) => {
+  const timers = captureTimers(t);
+  const session = initialSession();
+  const { DesktopAuthManager, getSession } = loadDesktopAuthManager(session);
+  const manager = managerFrom(DesktopAuthManager);
+  t.mock.method(
+    global,
+    "fetch",
+    (_url, { signal }) =>
+      new Promise((_resolve, reject) => {
+        signal.addEventListener("abort", () => reject(new DOMException("aborted", "AbortError")));
+      })
+  );
+  const refresh = manager.refreshSession({ force: true });
+  const rejected = assert.rejects(refresh, { code: "AUTH_NETWORK_TIMEOUT" });
+  const drain = manager.drainRefreshForShutdown();
+  const timeout = timers.active().find((timer) => timer.delay === 20_000);
+  assert.ok(timeout);
+  timers.fire(timeout);
+  await Promise.all([rejected, drain]);
+  assert.equal(getSession().refreshToken, session.refreshToken);
+  assert.deepEqual(timers.active(), []);
+  manager.resumeBackgroundRefresh();
+  assert.equal(timers.active().length, 1);
+  assert.ok(timers.active()[0].delay > 4_000 && timers.active()[0].delay <= 5_000);
 });

@@ -4,10 +4,7 @@ const { i18nMain } = require("./helpers/i18nMain");
 const { publicUpdateInfo } = require("./helpers/releaseNotes");
 const { resolveUpdateFeed } = require("./helpers/updateFeedConfig");
 const { isAllowedUpdate } = require("./helpers/versionComparison");
-const {
-  shouldRemindAboutUpdate,
-  recordUpdateReminder,
-} = require("./helpers/updateReminderStore");
+const { shouldRemindAboutUpdate, recordUpdateReminder } = require("./helpers/updateReminderStore");
 
 const CREATIVE_UPDATE_MESSAGE_KEYS = [
   "betterListener",
@@ -20,13 +17,20 @@ class UpdateManager {
   constructor() {
     this.updateAvailable = false;
     this.updateDownloaded = false;
-    this.lastUpdateInfo = null;
+    this.availableUpdateInfo = null;
+    this.downloadedUpdateInfo = null;
+    this.downloadProgress = 0;
     this.isInstalling = false;
+    this.installAttempt = 0;
     this.isDownloading = false;
     this.isQuittingForUpdate = false;
     this.handleBeforeQuitForUpdate = null;
     this.eventListeners = [];
     this.updateCheckInterval = null;
+    this.startupCheckTimer = null;
+    this.updateRetryTimer = null;
+    this.updateRetryAttempt = 0;
+    this.stopped = false;
     this.windowManager = null;
     this.authManager = null;
     this._suppressNotification = false;
@@ -98,15 +102,13 @@ class UpdateManager {
       autoUpdater.channel = nativeArch === "arm64" ? "latest-arm64" : "latest-x64";
     }
 
-    // Required only for the intentional one-time 1.x -> 0.1.0 product-version
-    // reset. Every candidate is still checked by isAllowedUpdate at the event,
-    // check, and download boundaries.
-    autoUpdater.allowDowngrade = true;
+    // Assign after channel: electron-updater's channel setter enables downgrades.
+    autoUpdater.allowDowngrade = false;
 
     autoUpdater.autoDownload = false;
     // Never interrupt work: a downloaded update is offered through a native
     // "Restart & install" action. If it is dismissed, apply it when the user
-    // next quits VoiceLab normally, then relaunch the updated app.
+    // next quits VoiceLab normally.
     autoUpdater.autoInstallOnAppQuit = true;
     autoUpdater.logger = console;
 
@@ -122,27 +124,29 @@ class UpdateManager {
         if (!info?.version || !isAllowedUpdate(info.version, app.getVersion())) {
           this.updateAvailable = false;
           this._suppressNotification = false;
-          if (!this.updateDownloaded) this.lastUpdateInfo = null;
+          this.availableUpdateInfo = null;
           this.notifyRenderers("update-not-available", publicUpdateInfo(info));
           return;
         }
         this.updateAvailable = true;
-        if (info) {
-          this.lastUpdateInfo = publicUpdateInfo(info);
-        }
+        this.availableUpdateInfo = publicUpdateInfo(info);
         const publicInfo = publicUpdateInfo(info);
         this.notifyRenderers("update-available", publicInfo);
-        if (info && !this._suppressNotification && this.areNativeUpdateNotificationsEnabled()) {
+        if (
+          !this.updateDownloaded &&
+          !this._suppressNotification &&
+          this.areNativeUpdateNotificationsEnabled()
+        ) {
           this.showNativeUpdateNotification(publicInfo);
         }
         this._suppressNotification = false;
       },
       "update-not-available": (info) => {
         this.updateAvailable = false;
+        this.availableUpdateInfo = null;
         this._suppressNotification = false;
         if (!this.updateDownloaded) {
           this.isDownloading = false;
-          this.lastUpdateInfo = null;
         }
         this.notifyRenderers("update-not-available", info);
       },
@@ -150,9 +154,11 @@ class UpdateManager {
         console.error("❌ Auto-updater error:", err);
         this._suppressNotification = false;
         this.isDownloading = false;
+        this.recoverFailedInstall();
         this.notifyRenderers("update-error", err);
       },
       "download-progress": (progressObj) => {
+        this.downloadProgress = progressObj.percent;
         console.log(
           `📥 Download progress: ${progressObj.percent.toFixed(2)}% (${(progressObj.transferred / 1024 / 1024).toFixed(2)}MB / ${(progressObj.total / 1024 / 1024).toFixed(2)}MB)`
         );
@@ -163,16 +169,16 @@ class UpdateManager {
           this.updateAvailable = false;
           this.updateDownloaded = false;
           this.isDownloading = false;
-          this.lastUpdateInfo = null;
+          this.availableUpdateInfo = null;
+          this.downloadedUpdateInfo = null;
           this.notifyRenderers("update-not-available", publicUpdateInfo(info));
           return;
         }
         console.log("✅ Update downloaded successfully:", info?.version);
         this.updateDownloaded = true;
         this.isDownloading = false;
-        if (info) {
-          this.lastUpdateInfo = publicUpdateInfo(info);
-        }
+        this.downloadProgress = 100;
+        this.downloadedUpdateInfo = publicUpdateInfo(info);
         const publicInfo = publicUpdateInfo(info);
         this.notifyRenderers("update-downloaded", publicInfo);
         this.showNativeUpdateNotification(publicInfo, { readyToInstall: true });
@@ -207,6 +213,13 @@ class UpdateManager {
     }
   }
 
+  recoverFailedInstall() {
+    if (!this.isInstalling || this.isQuittingForUpdate) return;
+    this.installAttempt += 1;
+    this.isInstalling = false;
+    this.authManager?.resumeBackgroundRefresh?.();
+  }
+
   showNativeUpdateNotification(info, { preview = false, readyToInstall = false } = {}) {
     // Preview is an explicit developer action. Every ordinary native update
     // notification, including the post-download one, obeys user preferences.
@@ -232,9 +245,7 @@ class UpdateManager {
     }
 
     const messageKey =
-      CREATIVE_UPDATE_MESSAGE_KEYS[
-        Math.floor(Math.random() * CREATIVE_UPDATE_MESSAGE_KEYS.length)
-      ];
+      CREATIVE_UPDATE_MESSAGE_KEYS[Math.floor(Math.random() * CREATIVE_UPDATE_MESSAGE_KEYS.length)];
     const messagePath = `updateNotification.messages.${messageKey}`;
     const canUseActions = process.platform === "darwin" || process.platform === "win32";
     const title = readyToInstall
@@ -253,9 +264,7 @@ class UpdateManager {
       body,
       ...(canUseActions
         ? {
-            actions: [
-              { type: "button", text: primaryActionText },
-            ],
+            actions: [{ type: "button", text: primaryActionText }],
           }
         : { urgency: "normal", timeoutType: "never" }),
     });
@@ -266,15 +275,19 @@ class UpdateManager {
         return;
       }
 
-      const action = readyToInstall ? this.installUpdate() : this.downloadUpdate();
-      void action.catch((error) => {
-        console.error(
-          readyToInstall
-            ? "Failed to install the downloaded update from native notification:"
-            : "Failed to start update download from native notification:",
-          error
-        );
-      });
+      const action = this.updateDownloaded ? this.installUpdate() : this.downloadUpdate();
+      void action
+        .then((result) => {
+          if (!result.success) throw new Error(result.message);
+        })
+        .catch((error) => {
+          console.error(
+            readyToInstall
+              ? "Failed to install the downloaded update from native notification:"
+              : "Failed to start update download from native notification:",
+            error
+          );
+        });
     };
 
     const openUpdateAction = async () => {
@@ -301,20 +314,20 @@ class UpdateManager {
     notification.on("failed", (_event, error) => {
       console.error("Failed to display native update notification:", error);
     });
+    notification.once("show", () => {
+      if (preview || readyToInstall) return;
+      try {
+        recordUpdateReminder(info.version);
+      } catch (error) {
+        console.warn("Failed to record native update reminder:", error);
+      }
+    });
     notification.on("close", () => {
       if (this.nativeUpdateNotification === notification) {
         this.nativeUpdateNotification = null;
       }
     });
     notification.show();
-    if (!preview && !readyToInstall) {
-      try {
-        recordUpdateReminder(info.version);
-      } catch (error) {
-        // A reminder is optional; a storage error must not affect updating.
-        console.warn("Failed to record native update reminder:", error);
-      }
-    }
     return true;
   }
 
@@ -381,11 +394,11 @@ class UpdateManager {
 
       if (
         !this.updateAvailable ||
-        !this.lastUpdateInfo?.version ||
-        !isAllowedUpdate(this.lastUpdateInfo.version, app.getVersion())
+        !this.availableUpdateInfo?.version ||
+        !isAllowedUpdate(this.availableUpdateInfo.version, app.getVersion())
       ) {
         this.updateAvailable = false;
-        this.lastUpdateInfo = null;
+        this.availableUpdateInfo = null;
         return {
           success: false,
           message: "No newer update is available",
@@ -393,6 +406,7 @@ class UpdateManager {
       }
 
       this.isDownloading = true;
+      this.downloadProgress = 0;
       console.log("📥 Starting update download...");
       await autoUpdater.downloadUpdate();
       console.log("📥 Download initiated successfully");
@@ -406,6 +420,7 @@ class UpdateManager {
   }
 
   async installUpdate() {
+    let attempt = null;
     try {
       if (process.env.NODE_ENV === "development") {
         return {
@@ -429,6 +444,7 @@ class UpdateManager {
       }
 
       this.isInstalling = true;
+      attempt = ++this.installAttempt;
       console.log("🔄 Installing update and restarting...");
 
       // A background token refresh can be mid-flight right when someone clicks
@@ -437,21 +453,25 @@ class UpdateManager {
       // token the server already burned - that's a permanent "session expired",
       // not something a retry can fix. Let anything in flight finish first, and
       // stop new ones from starting during the quit sequence that follows.
-      this.authManager?.suspendBackgroundRefresh?.();
-      if (this.authManager?.refreshPromise) {
-        try {
-          await this.authManager.refreshPromise;
-        } catch (error) {
-          console.warn("Token refresh didn't finish before quitting for update:", error);
-        }
+      await this.authManager?.drainRefreshForShutdown?.();
+
+      // An updater error can arrive while the token refresh is settling.
+      if (!this.isInstalling || attempt !== this.installAttempt) {
+        return { success: false, message: "Update installation failed. Please try again." };
       }
 
       const isSilent = process.platform === "win32";
       autoUpdater.quitAndInstall(isSilent, true);
 
+      // Some platforms report installer failure through the error event rather
+      // than throwing from quitAndInstall().
+      if (!this.isInstalling || attempt !== this.installAttempt) {
+        return { success: false, message: "Update installation failed. Please try again." };
+      }
+
       return { success: true, message: "Update installation started" };
     } catch (error) {
-      this.isInstalling = false;
+      if (attempt === this.installAttempt) this.recoverFailedInstall();
       console.error("❌ Update installation error:", error);
       throw error;
     }
@@ -473,6 +493,10 @@ class UpdateManager {
         updateAvailable: this.updateAvailable,
         updateDownloaded: this.updateDownloaded,
         isDevelopment: process.env.NODE_ENV === "development",
+        isDownloading: this.isDownloading,
+        isInstalling: this.isInstalling,
+        downloadProgress: this.downloadProgress,
+        info: this.downloadedUpdateInfo || this.availableUpdateInfo,
       };
     } catch (error) {
       console.error("❌ Error getting update status:", error);
@@ -482,33 +506,56 @@ class UpdateManager {
 
   async getUpdateInfo() {
     try {
-      return this.lastUpdateInfo;
+      return this.downloadedUpdateInfo || this.availableUpdateInfo;
     } catch (error) {
       console.error("❌ Error getting update info:", error);
       throw error;
     }
   }
 
+  async checkForUpdatesInBackground() {
+    if (this.stopped || this.isInstalling) return;
+    try {
+      await autoUpdater.checkForUpdates();
+      clearTimeout(this.updateRetryTimer);
+      this.updateRetryTimer = null;
+      this.updateRetryAttempt = 0;
+    } catch (error) {
+      console.error("Background update check failed:", error);
+      // An offline launch should recover promptly without a permanent retry loop.
+      const retryDelays = [30_000, 120_000, 300_000];
+      if (!this.stopped && !this.updateRetryTimer && this.updateRetryAttempt < retryDelays.length) {
+        const delay = retryDelays[this.updateRetryAttempt++];
+        this.updateRetryTimer = setTimeout(() => {
+          this.updateRetryTimer = null;
+          void this.checkForUpdatesInBackground();
+        }, delay);
+      }
+    }
+  }
+
   checkForUpdatesOnStartup() {
     if (process.env.NODE_ENV !== "development") {
-      setTimeout(() => {
-        console.log("🔄 Checking for updates on startup...");
-        autoUpdater.checkForUpdates().catch((err) => {
-          console.error("Startup update check failed:", err);
-        });
+      this.stopped = false;
+      this.startupCheckTimer = setTimeout(() => {
+        this.startupCheckTimer = null;
+        void this.checkForUpdatesInBackground();
       }, 3000);
 
       const TWO_HOURS_MS = 2 * 60 * 60 * 1000;
       this.updateCheckInterval = setInterval(() => {
-        console.log("🔄 Periodic update check...");
-        autoUpdater.checkForUpdates().catch((err) => {
-          console.error("Periodic update check failed:", err);
-        });
+        this.updateRetryAttempt = 0;
+        void this.checkForUpdatesInBackground();
       }, TWO_HOURS_MS);
     }
   }
 
   cleanup() {
+    this.stopped = true;
+    clearTimeout(this.startupCheckTimer);
+    clearTimeout(this.updateRetryTimer);
+    this.startupCheckTimer = null;
+    this.updateRetryTimer = null;
     if (this.updateCheckInterval) {
       clearInterval(this.updateCheckInterval);
       this.updateCheckInterval = null;

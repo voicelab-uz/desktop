@@ -122,10 +122,7 @@ test("desktop startup cannot initialize legacy local AI runtimes", () => {
     /require\(["']\.\/src\/helpers\/(?:diarization|qdrantManager|modelManagerBridge|localEmbeddings|vectorIndex)["']\)/
   );
   assert.doesNotMatch(main, /new DiarizationManager\(|new QdrantManager\(|\.prewarmServer\(/);
-  assert.doesNotMatch(
-    main,
-    /sidecarRegistry\.register\(["'](?:diarization|llama|qdrant)["']/
-  );
+  assert.doesNotMatch(main, /sidecarRegistry\.register\(["'](?:diarization|llama|qdrant)["']/);
 
   assert.match(main, /let diarizationManager = null;/);
   assert.match(main, /new IPCHandlers\([\s\S]*?\bdiarizationManager,/);
@@ -201,7 +198,7 @@ test("dictation, retry, meeting, and upload routes are pinned to VoiceLab cloud"
     audioManager.indexOf("async processAudio("),
     audioManager.indexOf("async processWithLocalWhisper(")
   );
-  assert.match(processAudio, /processWithVoiceLabCloud\(audioBlob, metadata\)/);
+  assert.match(processAudio, /processWithVoiceLabCloud\(audioBlob, metadata, generation\)/);
   assert.doesNotMatch(processAudio, /processWithLocal|processWithOpenAIAPI|providerTranscribe/);
   assert.match(audioManager, /shouldUseStreaming\(_isSignedInOverride\)[\s\S]*?return false;/);
 

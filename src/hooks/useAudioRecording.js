@@ -27,6 +27,7 @@ export const useAudioRecording = (toast, options = {}) => {
   const [audioLevel, setAudioLevel] = useState(0);
   const audioManagerRef = useRef(null);
   const startLockRef = useRef(false);
+  const pendingStartActionRef = useRef(null);
   const stopLockRef = useRef(false);
   const wasRecordingRef = useRef(false);
   const wasMicUnavailableRef = useRef(false);
@@ -37,21 +38,33 @@ export const useAudioRecording = (toast, options = {}) => {
     async ({ voiceAgentRequested = false, translationRequested = false } = {}) => {
       if (startLockRef.current) return false;
       startLockRef.current = true;
+      pendingStartActionRef.current = null;
+      const manager = audioManagerRef.current;
       try {
-        if (!audioManagerRef.current) return false;
+        if (!manager) return false;
 
-        const currentState = audioManagerRef.current.getState();
+        const currentState = manager.getState();
         if (currentState.isRecording || currentState.isProcessing) return false;
 
-        audioManagerRef.current.setVoiceAgentRequested(voiceAgentRequested);
-        audioManagerRef.current.setTranslationRequested(translationRequested);
+        manager.setVoiceAgentRequested(voiceAgentRequested);
+        manager.setTranslationRequested(translationRequested);
 
         await playStartCue();
-        const didStart = await audioManagerRef.current.startRecording();
+        if (pendingStartActionRef.current || audioManagerRef.current !== manager) return false;
+        const didStart = await manager.startRecording();
+        if (audioManagerRef.current !== manager) {
+          manager.cleanup();
+          return false;
+        }
+        if (didStart && pendingStartActionRef.current) {
+          if (pendingStartActionRef.current === "cancel") manager.cancelRecording();
+          else manager.stopRecording();
+          return false;
+        }
 
         // A quick tap can end the recording inside the start call itself (deferred
         // streaming stop) — don't pause media for a recording that already ended. See #1060.
-        if (didStart && audioManagerRef.current.getState().isRecording) {
+        if (didStart && manager.getState().isRecording) {
           if (getSettings().pauseMediaOnDictation) {
             window.electronAPI?.pauseMediaPlayback?.();
           }
@@ -67,6 +80,10 @@ export const useAudioRecording = (toast, options = {}) => {
   );
 
   const performStopRecording = useCallback(async () => {
+    if (startLockRef.current) {
+      if (pendingStartActionRef.current !== "cancel") pendingStartActionRef.current = "stop";
+      return true;
+    }
     if (stopLockRef.current) return false;
     stopLockRef.current = true;
     try {
@@ -95,9 +112,10 @@ export const useAudioRecording = (toast, options = {}) => {
   }, []);
 
   useEffect(() => {
-    audioManagerRef.current = new AudioManager();
+    const manager = new AudioManager();
+    audioManagerRef.current = manager;
 
-    audioManagerRef.current.setCallbacks({
+    manager.setCallbacks({
       onStateChange: ({ isRecording, isProcessing, isStreaming, micCaptureStatus }) => {
         if (isRecording || isProcessing) {
           setWasPlaced(false);
@@ -206,6 +224,12 @@ export const useAudioRecording = (toast, options = {}) => {
         setAudioLevel(level);
       },
       onTranscriptionComplete: async (result) => {
+        const generation = manager._processingGeneration;
+        const isCurrent = () =>
+          audioManagerRef.current === manager &&
+          !manager._disposed &&
+          manager._processingGeneration === generation;
+        if (!isCurrent()) return;
         if (result.success) {
           const transcribedText = result.text?.trim();
 
@@ -238,7 +262,7 @@ export const useAudioRecording = (toast, options = {}) => {
 
           if (autoPasteEnabled) {
             const pasteStart = performance.now();
-            textWasPlaced = await audioManagerRef.current.safePaste(result.text, {
+            textWasPlaced = await manager.safePaste(result.text, {
               ...(isStreaming ? { fromStreaming: true } : {}),
               // Pasting writes this exact final text to the system clipboard first.
               // Keep it there after the native paste so it is immediately available
@@ -261,12 +285,15 @@ export const useAudioRecording = (toast, options = {}) => {
             await writeTextToClipboard(result.text);
           }
 
-          audioManagerRef.current.saveTranscription(result.text, result.rawText ?? result.text, {
+          if (!isCurrent()) return;
+          await manager.saveTranscription(result.text, result.rawText ?? result.text, {
+            accountId: result.accountId,
             clientTranscriptionId: result.clientTranscriptionId,
             desktopTranscriptionId: result.desktopTranscriptionId,
             desktopRevision: result.desktopRevision,
             desktopAudioAvailable: result.desktopAudioAvailable === true,
           });
+          if (!isCurrent()) return;
           if (textWasPlaced) {
             setWasPlaced(true);
             if (placedTimerRef.current) clearTimeout(placedTimerRef.current);
@@ -301,7 +328,9 @@ export const useAudioRecording = (toast, options = {}) => {
       audioManagerRef.current.warmupMicDriver?.();
       const currentState = audioManagerRef.current.getState();
 
-      if (!currentState.isRecording && !currentState.isProcessing) {
+      if (startLockRef.current) {
+        await performStopRecording();
+      } else if (!currentState.isRecording && !currentState.isProcessing) {
         await performStartRecording({ voiceAgentRequested, translationRequested });
       } else if (currentState.isRecording) {
         await performStopRecording();
@@ -366,11 +395,16 @@ export const useAudioRecording = (toast, options = {}) => {
       if (placedTimerRef.current) clearTimeout(placedTimerRef.current);
       if (audioManagerRef.current) {
         audioManagerRef.current.cleanup();
+        audioManagerRef.current = null;
       }
     };
   }, [toast, onToggle, performStartRecording, performStopRecording, t]);
 
   const cancelRecording = useCallback(async () => {
+    if (startLockRef.current) {
+      pendingStartActionRef.current = "cancel";
+      return true;
+    }
     if (audioManagerRef.current) {
       window.electronAPI?.unregisterCancelHotkey?.();
       const state = audioManagerRef.current.getState();
@@ -393,7 +427,9 @@ export const useAudioRecording = (toast, options = {}) => {
   };
 
   const toggleListening = async () => {
-    if (!isRecording && !isProcessing) {
+    if (startLockRef.current) {
+      await performStopRecording();
+    } else if (!isRecording && !isProcessing) {
       await performStartRecording();
     } else if (isRecording) {
       await performStopRecording();

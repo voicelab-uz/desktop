@@ -1,4 +1,10 @@
 import { create } from "zustand";
+import {
+  accountDataReady,
+  accountDataGeneration,
+  belongsToCurrentAccount,
+  onAccountDataChanged,
+} from "./accountDataScope";
 import type { TranscriptionItem } from "../types/electron";
 
 interface TranscriptionState {
@@ -14,6 +20,12 @@ const useTranscriptionStore = create<TranscriptionState>()(() => ({
 let hasBoundIpcListeners = false;
 const DEFAULT_LIMIT = 50;
 let currentLimit = DEFAULT_LIMIT;
+let loadGeneration = 0;
+onAccountDataChanged(() => {
+  loadGeneration += 1;
+  currentLimit = DEFAULT_LIMIT;
+  useTranscriptionStore.setState({ transcriptions: [], includeDiscarded: false });
+});
 
 function ensureIpcListeners() {
   if (hasBoundIpcListeners || typeof window === "undefined") {
@@ -73,19 +85,25 @@ export async function initializeTranscriptions(
   limit = currentLimit,
   includeDiscarded = useTranscriptionStore.getState().includeDiscarded
 ) {
+  await accountDataReady;
+  const request = ++loadGeneration;
+  const account = accountDataGeneration();
   currentLimit = limit;
   ensureIpcListeners();
   const items = await window.electronAPI.getTranscriptions(limit, { includeDiscarded });
-  useTranscriptionStore.setState({ transcriptions: items, includeDiscarded });
-  return items;
+  if (request !== loadGeneration || account !== accountDataGeneration()) return [];
+  const visible = items.filter(belongsToCurrentAccount);
+  useTranscriptionStore.setState({ transcriptions: visible, includeDiscarded });
+  return visible;
 }
 
 export function addTranscription(item: TranscriptionItem) {
-  if (!item) return;
+  if (!item || !belongsToCurrentAccount(item)) return;
   if (
     item.status === "failed" &&
     (item.error_code === "AUTH_EXPIRED" || item.error_code === "AUTH_REQUIRED")
-  ) return;
+  )
+    return;
   if (item.status === "discarded" && !useTranscriptionStore.getState().includeDiscarded) return;
   const { transcriptions } = useTranscriptionStore.getState();
   const withoutDuplicate = transcriptions.filter((existing) => existing.id !== item.id);
@@ -103,13 +121,14 @@ export function removeTranscription(id: number) {
 }
 
 export function updateTranscription(item: TranscriptionItem) {
-  if (!item) return;
+  if (!item || !belongsToCurrentAccount(item)) return;
   const { transcriptions } = useTranscriptionStore.getState();
   const next = transcriptions.map((existing) => (existing.id === item.id ? item : existing));
   useTranscriptionStore.setState({ transcriptions: next });
 }
 
 export function clearTranscriptions() {
+  loadGeneration += 1;
   if (useTranscriptionStore.getState().transcriptions.length === 0) return;
   useTranscriptionStore.setState({ transcriptions: [] });
 }

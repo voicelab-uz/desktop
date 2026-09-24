@@ -47,23 +47,6 @@ function isNewerVersion(candidate, current) {
 }
 
 function isAllowedUpdate(candidateValue, currentValue) {
-  const candidate = parseVersion(candidateValue);
-  const current = parseVersion(currentValue);
-  if (!candidate || !current) return false;
-
-  const candidateMajor = candidate.numbers[0];
-  const currentMajor = current.numbers[0];
-
-  // VoiceLab Desktop intentionally reset its public version from the legacy
-  // 1.x line to 0.1.0. This is the only permitted numeric downgrade.
-  if (currentMajor >= 1 && candidateValue.replace(/^v/, "") === "0.1.0") return true;
-
-  // While on the new 0.x line, ignore stale legacy 1.x releases still visible
-  // in the update feed. A future stable 1.0.0 remains a valid graduation.
-  if (currentMajor === 0 && candidateMajor >= 1) {
-    return candidateValue.replace(/^v/, "") === "1.0.0";
-  }
-
   return isNewerVersion(candidateValue, currentValue);
 }
 

@@ -123,7 +123,7 @@ test("desktop usage never blocks the authenticated dashboard", () => {
   const controlPanel = read("src/components/ControlPanel.tsx");
 
   const authGate = router.indexOf("isControlPanel && authLoaded && !isSignedIn");
-  const dashboard = router.indexOf("<ControlPanel initialSettingsSection=");
+  const dashboard = router.indexOf("<ControlPanel");
   assert.ok(authGate > -1 && authGate < dashboard, "authentication must be checked first");
   assert.doesNotMatch(router, /SubscriptionAccessGate/);
   assert.doesNotMatch(controlPanel, /UpgradePrompt|onLimitReached/);

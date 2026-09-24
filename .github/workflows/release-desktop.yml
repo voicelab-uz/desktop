@@ -147,6 +147,8 @@ jobs:
           echo "CSC_LINK=$certificate_path" >> "$GITHUB_ENV"
 
       - name: Compile native helpers
+        env:
+          TARGET_ARCH: ${{ matrix.arch }}
         run: |
           npm run compile:globe -- --arch ${{ matrix.arch }}
           npm run compile:fast-paste -- --arch ${{ matrix.arch }}
@@ -200,6 +202,9 @@ jobs:
           expected_macho_arch="${{ matrix.arch }}"
           if [[ "$expected_macho_arch" == "x64" ]]; then expected_macho_arch="x86_64"; fi
           lipo -archs "$executable" | tr ' ' '\n' | grep -Fx "$expected_macho_arch"
+          for helper in macos-globe-listener macos-fast-paste macos-paste-addon.node macos-mic-listener macos-text-monitor macos-media-remote macos-audio-tap; do
+            lipo -archs "$app_path/Contents/Resources/bin/$helper" | tr ' ' '\n' | grep -Fx "$expected_macho_arch"
+          done
           codesign --verify --deep --strict --verbose=2 "$app_path"
           codesign --display --verbose=4 "$app_path" 2>&1 | grep -E 'Authority=Developer ID Application|TeamIdentifier='
           xcrun stapler validate "$app_path"

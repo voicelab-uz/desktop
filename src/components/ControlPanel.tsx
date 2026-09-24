@@ -1,10 +1,7 @@
 import React, { Suspense, useState, useEffect, useRef, useCallback } from "react";
 import { useTranslation } from "react-i18next";
 import { Button } from "./ui/button";
-import {
-  AlertTriangle,
-  ChevronLeft,
-} from "lucide-react";
+import { AlertTriangle, ChevronLeft } from "lucide-react";
 import PostMigrationOnboarding from "./PostMigrationOnboarding";
 import { ConfirmDialog, AlertDialog } from "./ui/dialog";
 import { useDialogs } from "../hooks/useDialogs";
@@ -23,6 +20,7 @@ import {
   clearTranscriptions as clearStore,
 } from "../stores/transcriptionStore";
 import { useSettingsStore } from "../stores/settingsStore";
+import { accountDataGeneration } from "../stores/accountDataScope";
 import {
   useIsMeetingMode,
   useIsNarrowWindow,
@@ -90,14 +88,20 @@ function PanelLoadingFallback() {
   );
 }
 
-function ViewLoadingFallback({ view }: { view: "notes" | "dictionary" | "upload" | "integrations" }) {
+function ViewLoadingFallback({
+  view,
+}: {
+  view: "notes" | "dictionary" | "upload" | "integrations";
+}) {
   if (view === "notes") {
     return (
       <div className="flex min-h-full w-full" aria-busy="true" aria-label="Loading notes">
         <aside className="hidden w-60 shrink-0 border-r border-border/60 p-4 md:block">
           <Skeleton className="h-8 w-32" />
           <Skeleton className="mt-5 h-4 w-20" />
-          {[0, 1, 2].map((row) => <Skeleton key={row} className="mt-3 h-8 w-full" />)}
+          {[0, 1, 2].map((row) => (
+            <Skeleton key={row} className="mt-3 h-8 w-full" />
+          ))}
         </aside>
         <div className="min-w-0 flex-1 p-5">
           <Skeleton className="h-7 w-44" />
@@ -109,11 +113,17 @@ function ViewLoadingFallback({ view }: { view: "notes" | "dictionary" | "upload"
   }
 
   return (
-    <div className="mx-auto min-h-full w-full max-w-5xl p-5" aria-busy="true" aria-label="Loading content">
+    <div
+      className="mx-auto min-h-full w-full max-w-5xl p-5"
+      aria-busy="true"
+      aria-label="Loading content"
+    >
       <Skeleton className="h-7 w-40" />
       <Skeleton className="mt-3 h-4 w-72 max-w-full" />
       <div className="mt-7 space-y-3">
-        {[0, 1, 2].map((row) => <Skeleton key={row} className="h-14 w-full rounded-xl" />)}
+        {[0, 1, 2].map((row) => (
+          <Skeleton key={row} className="h-14 w-full rounded-xl" />
+        ))}
       </div>
     </div>
   );
@@ -172,10 +182,7 @@ export default function ControlPanel({ initialSettingsSection }: ControlPanelPro
   const [isLoadingMoreSavedDictations, setIsLoadingMoreSavedDictations] = useState(false);
   const [savedDictationsError, setSavedDictationsError] = useState<string | null>(null);
   const [activeView, setActiveView] = useState<ControlPanelView>("home");
-  const {
-    collapsed: sidebarCollapsed,
-    toggle: toggleSidebar,
-  } = useCollapsibleSidebar();
+  const { collapsed: sidebarCollapsed, toggle: toggleSidebar } = useCollapsibleSidebar();
   const isMeetingMode = useIsMeetingMode();
   const isNarrowWindow = useIsNarrowWindow();
   const activeNoteId = useActiveNoteId();
@@ -256,6 +263,7 @@ export default function ControlPanel({ initialSettingsSection }: ControlPanelPro
       if (
         !authLoaded ||
         !isSignedIn ||
+        !user?.id ||
         !dataRetentionEnabled ||
         !window.electronAPI?.desktopListTranscriptions
       ) {
@@ -278,7 +286,7 @@ export default function ControlPanel({ initialSettingsSection }: ControlPanelPro
         setIsLoadingMoreSavedDictations(false);
       }
     },
-    [authLoaded, dataRetentionEnabled, isSignedIn, showDiscarded]
+    [authLoaded, dataRetentionEnabled, isSignedIn, showDiscarded, user?.id]
   );
 
   useEffect(() => {
@@ -367,7 +375,6 @@ export default function ControlPanel({ initialSettingsSection }: ControlPanelPro
     }
   }, [authLoaded, isSignedIn]);
 
-
   useEffect(() => {
     const drain = async () => {
       const data = await window.electronAPI?.getPendingMeetingNoteNavigation?.();
@@ -446,10 +453,12 @@ export default function ControlPanel({ initialSettingsSection }: ControlPanelPro
     async (id: number) => {
       showConfirmDialog({
         title: t("controlPanel.history.deleteTitle"),
-        description: t("controlPanel.history.deleteDescription"),
+        description: t("controlPanel.history.removeFromDeviceDescription"),
         onConfirm: async () => {
           try {
+            const account = accountDataGeneration();
             const result = await window.electronAPI.deleteTranscription(id);
+            if (account !== accountDataGeneration()) return;
             if (result.success) {
               removeFromStore(id);
               syncService.requestSyncAll("manual");
@@ -475,10 +484,12 @@ export default function ControlPanel({ initialSettingsSection }: ControlPanelPro
   const clearAllTranscriptions = useCallback(() => {
     showConfirmDialog({
       title: t("controlPanel.history.clearAllTitle"),
-      description: t("controlPanel.history.clearAllDescription"),
+      description: t("controlPanel.history.clearDeviceDescription"),
       onConfirm: async () => {
         try {
+          const account = accountDataGeneration();
           const result = await window.electronAPI.clearTranscriptions();
+          if (account !== accountDataGeneration()) return;
           if (result.success) {
             clearStore();
             syncService.requestSyncAll("manual");
@@ -723,7 +734,8 @@ export default function ControlPanel({ initialSettingsSection }: ControlPanelPro
                     label: updateStatus.updateDownloaded
                       ? t("controlPanel.update.installButton")
                       : t("controlPanel.update.availableButton"),
-                    progress: updateStatus.updateDownloaded || isInstalling ? 100 : downloadProgress,
+                    progress:
+                      updateStatus.updateDownloaded || isInstalling ? 100 : downloadProgress,
                     disabled: isInstalling,
                     onClick: () => void handleUpdateClick(),
                   }
@@ -755,10 +767,7 @@ export default function ControlPanel({ initialSettingsSection }: ControlPanelPro
               )}
               <div className="flex-1" />
               {platform !== "darwin" && (
-                <div
-                  className="pr-1"
-                  style={{ WebkitAppRegion: "no-drag" } as React.CSSProperties}
-                >
+                <div className="pr-1" style={{ WebkitAppRegion: "no-drag" } as React.CSSProperties}>
                   <WindowControls />
                 </div>
               )}

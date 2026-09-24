@@ -173,11 +173,14 @@ function MainApp() {
   return isControlPanel ? (
     <Suspense fallback={<LoadingFallback />}>
       <div className={isControlPanelEntering ? "app-content-in" : undefined}>
-        <ControlPanel initialSettingsSection={postOnboardingSettingsSection} />
+        <ControlPanel
+          key={user?.id ?? "signed-out"}
+          initialSettingsSection={postOnboardingSettingsSection}
+        />
       </div>
     </Suspense>
   ) : (
-    <App />
+    <App key={user?.id ?? "signed-out"} />
   );
 }
 

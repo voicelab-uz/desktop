@@ -6,6 +6,13 @@ const INSTALLATION_ID = "0191f85b-7b5d-7f2a-8d71-2f5ea87cdf77";
 const REQUEST_ID = `dau_${"r".repeat(43)}`;
 const CALLBACK_CODE = `dac_${"c".repeat(43)}`;
 
+const successfulTokens = () => ({
+  access_token: "access-token-abcdefghijklmnopqrstuvwxyz",
+  refresh_token: "refresh-token-abcdefghijklmnopqrstuvwxyz",
+  session_id: "desktop-session-recovered",
+  user: { id: "user-recovered", email: "recovered@example.com" },
+});
+
 function loopbackCallback(pending, { code = CALLBACK_CODE, state = pending.state } = {}) {
   const url = new URL(pending.redirectUri);
   url.searchParams.set("code", code);
@@ -104,6 +111,94 @@ function managerFrom(DesktopAuthManager, { useCustomProtocol = false } = {}) {
     useCustomProtocol,
   });
 }
+
+for (const operation of ["start", "reopen"]) {
+  for (const terminalState of [
+    "cancelled",
+    "expired",
+    "authenticated",
+    "authenticated-browser-error",
+  ]) {
+    test(`${operation} browser completion cannot overwrite ${terminalState}`, async (t) => {
+      let completeOpen;
+      let openCount = 0;
+      const { DesktopAuthManager, getPending, expirePending } = loadDesktopAuthManager(null, {
+        openExternal: () => {
+          openCount += 1;
+          if (operation === "reopen" && openCount === 1) return;
+          return new Promise((resolve, reject) => {
+            completeOpen = () =>
+              terminalState.endsWith("browser-error")
+                ? reject(new Error("late browser error"))
+                : resolve();
+          });
+        },
+      });
+      const manager = managerFrom(DesktopAuthManager, { useCustomProtocol: true });
+      t.after(() => manager.cancelAuthorization());
+      t.mock.method(global, "fetch", async (url) =>
+        url.endsWith("/authorizations")
+          ? jsonResponse(201, {
+              authorization_request_id: REQUEST_ID,
+              authorization_url: `https://voicelab.uz/app/sign-in?desktop_auth_id=${REQUEST_ID}`,
+            })
+          : jsonResponse(200, successfulTokens())
+      );
+      if (operation === "reopen") await manager.startAuthorization();
+      const opening =
+        operation === "start" ? manager.startAuthorization() : manager.reopenAuthorization();
+      await new Promise((resolve) => setImmediate(resolve));
+      assert.equal(typeof completeOpen, "function");
+      if (terminalState === "cancelled") manager.cancelAuthorization();
+      else if (terminalState === "expired") {
+        expirePending();
+        manager._schedulePendingExpiry(Date.now() - 1);
+        await new Promise((resolve) => setTimeout(resolve, 5));
+      } else {
+        await manager.handleCallback(loopbackCallback(getPending()));
+      }
+      completeOpen();
+      const expected = terminalState.startsWith("authenticated") ? "authenticated" : terminalState;
+      assert.equal((await opening).status, expected);
+      assert.equal(manager.getPublicStatus().status, expected);
+      assert.equal(getPending(), null);
+    });
+  }
+}
+
+test("loopback exchange retry keeps the registered callback listener reachable", async (t) => {
+  const originalFetch = global.fetch;
+  const { DesktopAuthManager, getPending, getStoredSession } = loadDesktopAuthManager();
+  const manager = managerFrom(DesktopAuthManager);
+  t.after(() => manager.cancelAuthorization());
+  let exchanges = 0;
+  t.mock.method(global, "fetch", async (url) => {
+    if (url.endsWith("/authorizations"))
+      return jsonResponse(201, {
+        authorization_request_id: REQUEST_ID,
+        authorization_url: `https://voicelab.uz/app/sign-in?desktop_auth_id=${REQUEST_ID}`,
+      });
+    exchanges += 1;
+    return exchanges === 1
+      ? jsonResponse(503, { error: { code: "auth_unavailable" } }, { "Retry-After": "1" })
+      : jsonResponse(200, successfulTokens());
+  });
+  await manager.startAuthorization();
+  const callback = loopbackCallback(getPending());
+  const first = await originalFetch(callback);
+  await first.text();
+  assert.equal(first.status, 400);
+  assert.equal(manager.getPublicStatus().status, "waiting-for-browser");
+  assert.ok(manager.callbackServer?.listening);
+  await manager.reopenAuthorization();
+  assert.equal(loopbackCallback(getPending()), callback);
+  const second = await originalFetch(callback);
+  await second.text();
+  assert.equal(second.status, 200);
+  assert.equal(exchanges, 2);
+  assert.equal(getStoredSession().sessionId, "desktop-session-recovered");
+  assert.equal(manager.callbackServer, null);
+});
 
 test("starts system-browser PKCE authorization through the exact Go contract", async (t) => {
   const originalFetch = global.fetch;

@@ -1,4 +1,5 @@
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useCallback } from "react";
+import type { UpdateStatusResult } from "../types/electron";
 
 interface UpdateStatus {
   updateAvailable: boolean;
@@ -9,7 +10,7 @@ interface UpdateStatus {
 interface UpdateInfo {
   version?: string;
   releaseDate?: string;
-  releaseNotes?: string;
+  releaseNotes?: string | null;
   files?: any[];
 }
 
@@ -55,6 +56,10 @@ let globalState: UpdateState = {
 const stateListeners = new Set<(state: UpdateState) => void>();
 let listenersRegistered = false;
 const cleanupFunctions: Array<() => void> = [];
+let stateRevision = 0;
+let installRequest = 0;
+let statusRefreshPromise: Promise<void> | null = null;
+let statusRefreshTimer: ReturnType<typeof setTimeout> | null = null;
 
 function getDevelopmentProgressPreview(): number | null {
   if (!import.meta.env.DEV) return null;
@@ -71,8 +76,43 @@ function notifyListeners() {
 }
 
 function updateGlobalState(updates: Partial<UpdateState>) {
+  stateRevision += 1;
   globalState = { ...globalState, ...updates };
   notifyListeners();
+}
+
+async function refreshUpdateStatus() {
+  if (!window.electronAPI?.getUpdateStatus) return;
+  if (statusRefreshPromise) return statusRefreshPromise;
+  statusRefreshPromise = (async () => {
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      const revision = stateRevision;
+      const status: UpdateStatusResult = await window.electronAPI.getUpdateStatus();
+      // Events carry only part of the state. Re-read after a race instead of
+      // permanently dropping the initial downloaded version or busy state.
+      if (revision !== stateRevision) continue;
+      updateGlobalState({
+        status,
+        info: status.info ?? null,
+        isDownloading: status.isDownloading ?? false,
+        isInstalling: status.isInstalling ?? false,
+        downloadProgress: status.downloadProgress ?? (status.updateDownloaded ? 100 : 0),
+      });
+      return;
+    }
+    // Avoid a tight loop if progress events keep arriving during hydration.
+    if (stateListeners.size > 0 && !statusRefreshTimer) {
+      statusRefreshTimer = setTimeout(() => {
+        statusRefreshTimer = null;
+        void refreshUpdateStatus().catch((error) => {
+          console.error("Failed to refresh update status:", error);
+        });
+      }, 100);
+    }
+  })().finally(() => {
+    statusRefreshPromise = null;
+  });
+  return statusRefreshPromise;
 }
 
 function registerEventListeners() {
@@ -86,7 +126,7 @@ function registerEventListeners() {
     const dispose = window.electronAPI.onUpdateAvailable((_event, info) => {
       updateGlobalState({
         status: { ...globalState.status, updateAvailable: true },
-        info: info || globalState.info,
+        info: globalState.status.updateDownloaded ? globalState.info : info || globalState.info,
       });
     });
     if (dispose) cleanupFunctions.push(dispose);
@@ -134,6 +174,7 @@ function registerEventListeners() {
 
   if (window.electronAPI.onUpdateError) {
     const dispose = window.electronAPI.onUpdateError((_event, error) => {
+      installRequest += 1;
       updateGlobalState({
         isChecking: false,
         isDownloading: false,
@@ -146,6 +187,10 @@ function registerEventListeners() {
 }
 
 function cleanup() {
+  if (stateListeners.size === 0 && statusRefreshTimer) {
+    clearTimeout(statusRefreshTimer);
+    statusRefreshTimer = null;
+  }
   if (stateListeners.size === 0 && listenersRegistered) {
     cleanupFunctions.forEach((fn) => fn());
     cleanupFunctions.length = 0;
@@ -155,7 +200,6 @@ function cleanup() {
 
 export function useUpdater() {
   const [state, setState] = useState<UpdateState>(globalState);
-  const isInstallingRef = useRef(false);
 
   useEffect(() => {
     stateListeners.add(setState);
@@ -182,17 +226,7 @@ export function useUpdater() {
 
     const initializeUpdateStatus = async () => {
       try {
-        if (window.electronAPI?.getUpdateStatus) {
-          const status = await window.electronAPI.getUpdateStatus();
-          updateGlobalState({ status });
-        }
-
-        if (window.electronAPI?.getUpdateInfo) {
-          const info = await window.electronAPI.getUpdateInfo();
-          if (info) {
-            updateGlobalState({ info });
-          }
-        }
+        await refreshUpdateStatus();
       } catch (error) {
         console.error("Failed to initialize update status:", error);
       }
@@ -229,6 +263,8 @@ export function useUpdater() {
     updateGlobalState({ isDownloading: true, downloadProgress: 0, error: null });
     try {
       const result = await window.electronAPI.downloadUpdate();
+      if (!result.success) throw new Error(result.message);
+      await refreshUpdateStatus();
       return result;
     } catch (error) {
       updateGlobalState({
@@ -244,29 +280,18 @@ export function useUpdater() {
       throw new Error("No update available to install");
     }
 
+    const request = ++installRequest;
     updateGlobalState({ isInstalling: true, error: null });
-    isInstallingRef.current = true;
-
     try {
-      await window.electronAPI.installUpdate();
-
-      setTimeout(() => {
-        if (isInstallingRef.current) {
-          isInstallingRef.current = false;
-          updateGlobalState({
-            isInstalling: false,
-            error: new Error(
-              "Install timed out. Please restart the app manually to apply the update."
-            ),
-          });
-        }
-      }, 10000);
+      const result = await window.electronAPI.installUpdate();
+      if (!result.success) throw new Error(result.message);
     } catch (error) {
-      isInstallingRef.current = false;
-      updateGlobalState({
-        isInstalling: false,
-        error: error instanceof Error ? error : new Error(String(error)),
-      });
+      if (request === installRequest) {
+        updateGlobalState({
+          isInstalling: false,
+          error: error instanceof Error ? error : new Error(String(error)),
+        });
+      }
       throw error;
     }
   }, [state.status.updateDownloaded]);

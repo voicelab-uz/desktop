@@ -54,6 +54,7 @@ import {
   findDefaultFolder,
 } from "./shared";
 import logger from "../../utils/logger";
+import { createDebouncedNoteSaver } from "../../helpers/debouncedNoteSaver";
 import { parseTranscriptSegments } from "../../utils/parseTranscriptSegments";
 import { serializeTranscriptSegments } from "../../utils/transcriptSpeakerState";
 import { resolveExpectedSpeakerCount } from "../../utils/participants";
@@ -136,8 +137,20 @@ export default function PersonalNotesView({
   const [newNoteFolderId, setNewNoteFolderId] = useState<string>("");
   const [isCreatingNewNoteFolder, setIsCreatingNewNoteFolder] = useState(false);
   const [newNoteFolderName, setNewNoteFolderName] = useState("");
-  const saveTimeoutRef = useRef<NodeJS.Timeout | null>(null);
-  const enhancedSaveTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const [noteSaver] = useState(() =>
+    createDebouncedNoteSaver(
+      async (noteId, patch) => {
+        setIsSaving(true);
+        try {
+          const result = await window.electronAPI.updateNote(noteId, patch);
+          if (!result.success) throw new Error("Note could not be saved");
+        } finally {
+          setIsSaving(false);
+        }
+      },
+      (error) => logger.warn("Failed to save note", { error: String(error) }, "notes")
+    )
+  );
   const activeNoteRef = useRef<number | null>(null);
   const [syncedNoteId, setSyncedNoteIdState] = useState<number | null>(null);
   const localContentRef = useRef(localContent);
@@ -248,24 +261,10 @@ export default function PersonalNotesView({
 
   useEffect(() => {
     if (activeNote && activeNote.id !== activeNoteRef.current) {
-      // --- Switching notes ---
-      // 1. Capture old note state before anything changes
-      const oldNoteId = activeNoteRef.current;
-      const oldTitle = localTitleRef.current;
-      const oldContent = localContentRef.current;
-      const hadPendingSave = !!saveTimeoutRef.current;
+      // Persist the previous draft before replacing its local view state.
+      void noteSaver.flush();
 
-      // 2. Clear all pending timers
-      if (saveTimeoutRef.current) {
-        clearTimeout(saveTimeoutRef.current);
-        saveTimeoutRef.current = null;
-      }
-      if (enhancedSaveTimeoutRef.current) {
-        clearTimeout(enhancedSaveTimeoutRef.current);
-        enhancedSaveTimeoutRef.current = null;
-      }
-
-      // 3. Switch to new note IMMEDIATELY (no await, eliminates race window)
+      // Switch immediately; the saver owns the previous draft.
       markNoteAsSynced(activeNote.id);
       setLocalTitle(activeNote.title);
       setLocalContent(activeNote.content);
@@ -273,20 +272,12 @@ export default function PersonalNotesView({
       // Also update refs directly so callbacks are correct before next render
       localTitleRef.current = activeNote.title;
       localContentRef.current = activeNote.content;
-
-      // 4. Flush old note data fire-and-forget (uses captured values, not refs)
-      if (hadPendingSave && oldNoteId) {
-        window.electronAPI
-          .updateNote(oldNoteId, { title: oldTitle, content: oldContent })
-          .catch((err: unknown) => {
-            logger.warn(
-              "Failed to flush note on switch",
-              { error: (err as Error).message },
-              "notes"
-            );
-          });
-      }
-    } else if (activeNote && activeNote.id === activeNoteRef.current && !saveTimeoutRef.current) {
+      localEnhancedContentRef.current = activeNote.enhanced_content ?? null;
+    } else if (
+      activeNote &&
+      activeNote.id === activeNoteRef.current &&
+      !noteSaver.hasPending(activeNote.id)
+    ) {
       // External update (e.g. AI chat tool) — resync only when no user save is pending
       if (activeNote.title !== localTitleRef.current) setLocalTitle(activeNote.title);
       if (activeNote.content !== localContentRef.current) setLocalContent(activeNote.content);
@@ -294,76 +285,52 @@ export default function PersonalNotesView({
         setLocalEnhancedContent(activeNote.enhanced_content ?? null);
       }
     } else if (!activeNote) {
-      if (saveTimeoutRef.current) {
-        clearTimeout(saveTimeoutRef.current);
-        saveTimeoutRef.current = null;
-      }
-      if (enhancedSaveTimeoutRef.current) {
-        clearTimeout(enhancedSaveTimeoutRef.current);
-        enhancedSaveTimeoutRef.current = null;
-      }
+      void noteSaver.flush();
       markNoteAsSynced(null);
       setLocalTitle("");
       setLocalContent("");
       setLocalEnhancedContent(null);
     }
-  }, [activeNote]);
-
-  const debouncedSave = useCallback((noteId: number, title: string, content: string) => {
-    if (saveTimeoutRef.current) clearTimeout(saveTimeoutRef.current);
-    saveTimeoutRef.current = setTimeout(async () => {
-      saveTimeoutRef.current = null;
-      setIsSaving(true);
-      try {
-        await window.electronAPI.updateNote(noteId, { title, content });
-      } catch (err) {
-        logger.warn("Failed to save note", { error: (err as Error).message }, "notes");
-      } finally {
-        setIsSaving(false);
-      }
-    }, 1000);
-  }, []);
+  }, [activeNote, noteSaver]);
 
   useEffect(() => {
-    return () => {
-      if (saveTimeoutRef.current) clearTimeout(saveTimeoutRef.current);
-      if (enhancedSaveTimeoutRef.current) clearTimeout(enhancedSaveTimeoutRef.current);
+    const flush = () => {
+      void noteSaver.flush();
     };
-  }, []);
+    window.addEventListener("beforeunload", flush);
+    return () => {
+      window.removeEventListener("beforeunload", flush);
+      flush();
+    };
+  }, [noteSaver]);
 
   const handleTitleChange = useCallback(
     (title: string) => {
+      localTitleRef.current = title;
       setLocalTitle(title);
-      if (activeNoteRef.current)
-        debouncedSave(activeNoteRef.current, title, localContentRef.current);
+      if (activeNoteRef.current) noteSaver.schedule(activeNoteRef.current, { title });
     },
-    [debouncedSave]
+    [noteSaver]
   );
 
   const handleContentChange = useCallback(
     (content: string) => {
+      localContentRef.current = content;
       setLocalContent(content);
-      if (activeNoteRef.current)
-        debouncedSave(activeNoteRef.current, localTitleRef.current, content);
+      if (activeNoteRef.current) noteSaver.schedule(activeNoteRef.current, { content });
     },
-    [debouncedSave]
+    [noteSaver]
   );
 
-  const handleEnhancedContentChange = useCallback((content: string) => {
-    setLocalEnhancedContent(content);
-    if (!activeNoteRef.current) return;
-    const noteId = activeNoteRef.current;
-    if (enhancedSaveTimeoutRef.current) clearTimeout(enhancedSaveTimeoutRef.current);
-    enhancedSaveTimeoutRef.current = setTimeout(async () => {
-      enhancedSaveTimeoutRef.current = null;
-      setIsSaving(true);
-      try {
-        await window.electronAPI.updateNote(noteId, { enhanced_content: content });
-      } finally {
-        setIsSaving(false);
-      }
-    }, 1000);
-  }, []);
+  const handleEnhancedContentChange = useCallback(
+    (content: string) => {
+      localEnhancedContentRef.current = content;
+      setLocalEnhancedContent(content);
+      if (activeNoteRef.current)
+        noteSaver.schedule(activeNoteRef.current, { enhanced_content: content });
+    },
+    [noteSaver]
+  );
 
   const handleNewNote = useCallback(async () => {
     if (!activeFolderId) return;
@@ -435,14 +402,11 @@ export default function PersonalNotesView({
 
   const handleDelete = useCallback(
     async (id: number) => {
-      if (saveTimeoutRef.current) {
-        clearTimeout(saveTimeoutRef.current);
-        saveTimeoutRef.current = null;
-      }
+      noteSaver.cancel(id);
       await window.electronAPI.deleteNote(id);
       loadFolders();
     },
-    [loadFolders]
+    [loadFolders, noteSaver]
   );
 
   const handleMoveToFolder = useCallback(

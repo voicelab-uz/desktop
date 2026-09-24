@@ -15,8 +15,7 @@ test("the start cue completes before microphone recording starts", () => {
 
   assert.ok(startFlow.indexOf("await playStartCue();") >= 0);
   assert.ok(
-    startFlow.indexOf("await playStartCue();") <
-      startFlow.indexOf("audioManagerRef.current.startRecording()")
+    startFlow.indexOf("await playStartCue();") < startFlow.indexOf("manager.startRecording()")
   );
 });
 
@@ -49,7 +48,7 @@ test("recoverable desktop STT failures retain audio, while final success release
     source.indexOf("async processWithLocalWhisper")
   );
   const saveTranscription = source.slice(
-    source.indexOf("async saveTranscription(text"),
+    source.indexOf("async saveTranscription("),
     source.indexOf("async saveFailedTranscription")
   );
 

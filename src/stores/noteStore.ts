@@ -1,4 +1,10 @@
 import { create } from "zustand";
+import {
+  accountDataReady,
+  accountDataGeneration,
+  belongsToCurrentAccount,
+  onAccountDataChanged,
+} from "./accountDataScope";
 import type { NoteItem, NoteShareInvitation, ShareSettings } from "../types/electron";
 
 export interface NoteShareCacheEntry {
@@ -29,6 +35,17 @@ let hasBoundIpcListeners = false;
 const DEFAULT_LIMIT = 50;
 let currentLimit = DEFAULT_LIMIT;
 let loadGeneration = 0;
+onAccountDataChanged(() => {
+  loadGeneration += 1;
+  currentLimit = DEFAULT_LIMIT;
+  useNoteStore.setState({
+    notes: [],
+    activeNoteId: null,
+    activeFolderId: null,
+    migration: null,
+    shareByCloudId: new Map(),
+  });
+});
 
 function ensureIpcListeners() {
   if (hasBoundIpcListeners || typeof window === "undefined") {
@@ -80,17 +97,20 @@ export async function initializeNotes(
   limit = DEFAULT_LIMIT,
   folderId?: number | null
 ): Promise<NoteItem[]> {
+  await accountDataReady;
   const gen = ++loadGeneration;
+  const account = accountDataGeneration();
   currentLimit = limit;
   ensureIpcListeners();
   const items = (await window.electronAPI?.getNotes(noteType, limit, folderId)) ?? [];
-  if (gen !== loadGeneration) return items;
-  useNoteStore.setState({ notes: items });
-  return items;
+  if (gen !== loadGeneration || account !== accountDataGeneration()) return [];
+  const visible = items.filter(belongsToCurrentAccount);
+  useNoteStore.setState({ notes: visible });
+  return visible;
 }
 
 export function addNote(note: NoteItem): void {
-  if (!note) return;
+  if (!note || !belongsToCurrentAccount(note)) return;
   const { notes, activeFolderId } = useNoteStore.getState();
   if (activeFolderId && note.folder_id !== activeFolderId) return;
   const withoutDuplicate = notes.filter((existing) => existing.id !== note.id);
@@ -98,7 +118,7 @@ export function addNote(note: NoteItem): void {
 }
 
 export function updateNoteInStore(note: NoteItem): void {
-  if (!note) return;
+  if (!note || !belongsToCurrentAccount(note)) return;
   const { notes } = useNoteStore.getState();
   useNoteStore.setState({
     notes: notes.map((existing) => (existing.id === note.id ? note : existing)),

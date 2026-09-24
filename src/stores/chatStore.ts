@@ -1,4 +1,10 @@
 import { create } from "zustand";
+import {
+  accountDataReady,
+  accountDataGeneration,
+  belongsToCurrentAccount,
+  onAccountDataChanged,
+} from "./accountDataScope";
 
 interface ConversationItem {
   id: number;
@@ -23,21 +29,32 @@ const useChatStore = create<ChatState>()(() => ({
   migration: null,
 }));
 
+let loadGeneration = 0;
+onAccountDataChanged(() => {
+  loadGeneration += 1;
+  useChatStore.setState({ conversations: [], activeConversationId: null, migration: null });
+});
+
 export async function initializeConversations(limit = 50): Promise<ConversationItem[]> {
+  await accountDataReady;
+  const request = ++loadGeneration;
+  const account = accountDataGeneration();
   const items = (await window.electronAPI?.getAgentConversations?.(limit)) ?? [];
-  useChatStore.setState({ conversations: items });
-  return items;
+  if (request !== loadGeneration || account !== accountDataGeneration()) return [];
+  const visible = items.filter(belongsToCurrentAccount);
+  useChatStore.setState({ conversations: visible });
+  return visible;
 }
 
 export function addConversation(conversation: ConversationItem): void {
-  if (!conversation) return;
+  if (!conversation || !belongsToCurrentAccount(conversation)) return;
   const { conversations } = useChatStore.getState();
   const withoutDuplicate = conversations.filter((c) => c.id !== conversation.id);
   useChatStore.setState({ conversations: [conversation, ...withoutDuplicate] });
 }
 
 export function updateConversation(conversation: ConversationItem): void {
-  if (!conversation) return;
+  if (!conversation || !belongsToCurrentAccount(conversation)) return;
   const { conversations } = useChatStore.getState();
   useChatStore.setState({
     conversations: conversations.map((c) => (c.id === conversation.id ? conversation : c)),

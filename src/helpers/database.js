@@ -7,10 +7,7 @@ const { app } = require("electron");
 const { LocalDataEnvelope } = require("./localDataEnvelope");
 const { LocalDataCrypto } = require("./localDataCrypto");
 const { preserveLegacyKeychainData } = require("./legacyLocalDataRecovery");
-const {
-  LocalDataProtection,
-  normalizeDictionaryValue,
-} = require("./localDataProtection");
+const { LocalDataProtection, normalizeDictionaryValue } = require("./localDataProtection");
 
 // Server-enforced trigger cap (openwhispr-api); enforced here so one oversized
 // trigger can't 400 the whole sync batch.
@@ -302,9 +299,13 @@ class DatabaseManager {
         ["transcriptions", "privacy_scope_id", "TEXT NOT NULL DEFAULT 'device-local'"],
       ]) {
         const columns = new Set(
-          this.db.prepare(`PRAGMA table_info(${table})`).all().map((row) => row.name)
+          this.db
+            .prepare(`PRAGMA table_info(${table})`)
+            .all()
+            .map((row) => row.name)
         );
-        if (!columns.has(column)) this.db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`);
+        if (!columns.has(column))
+          this.db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`);
       }
       this.db.exec(`
         UPDATE notes SET privacy_scope_id = 'device-local'
@@ -710,11 +711,7 @@ class DatabaseManager {
       );
 
       this.localDataCrypto = LocalDataCrypto.forUserDataPath(app.getPath("userData"));
-      this.localDataProtection = new LocalDataProtection(
-        this.db,
-        this.localDataCrypto,
-        dbPath
-      );
+      this.localDataProtection = new LocalDataProtection(this.db, this.localDataCrypto, dbPath);
       this.localDataProtection.migrateCore();
       this.dataEnvelope.retire?.();
 
@@ -776,19 +773,11 @@ class DatabaseManager {
   }
 
   _dictionaryIndex(word) {
-    return this.localDataProtection.index(
-      "custom_dictionary:word",
-      normalizeDictionaryValue(word)
-    );
+    return this.localDataProtection.index("custom_dictionary:word", normalizeDictionaryValue(word));
   }
 
   _protectDictionaryWord(identity, word) {
-    return this.localDataProtection.protect(
-      "custom_dictionary",
-      identity,
-      "word",
-      word
-    );
+    return this.localDataProtection.protect("custom_dictionary", identity, "word", word);
   }
 
   _decodeNote(row) {
@@ -806,18 +795,22 @@ class DatabaseManager {
       "participants",
     ]) {
       if (decoded[field] !== null && decoded[field] !== undefined) {
-        decoded[field] = this.localDataProtection.reveal(
-          "notes",
-          identity,
-          field,
-          decoded[field]
-        );
+        decoded[field] = this.localDataProtection.reveal("notes", identity, field, decoded[field]);
       }
     }
     return decoded;
   }
 
+  setAccountProvider(provider) {
+    this.accountProvider = provider;
+  }
+
   _activePrivacyScope() {
+    // Authentication owns local privacy; sync consent/availability must not decide it.
+    if (this.accountProvider) {
+      const accountId = this.accountProvider();
+      return accountId ? `account:${accountId}` : "signed-out";
+    }
     const accountId = this.desktopSyncStore?.activeAccount()?.account_id;
     return accountId ? `account:${accountId}` : "device-local";
   }
@@ -892,11 +885,7 @@ class DatabaseManager {
         this._protectTranscriptionField(clientTranscriptionId, "text", text),
         this._protectTranscriptionField(clientTranscriptionId, "raw_text", rawText),
         status,
-        this._protectTranscriptionField(
-          clientTranscriptionId,
-          "error_message",
-          errorMessage
-        ),
+        this._protectTranscriptionField(clientTranscriptionId, "error_message", errorMessage),
         errorCode,
         routeKind,
         clientTranscriptionId,
@@ -937,6 +926,37 @@ class DatabaseManager {
     }
   }
 
+  _ensureHistoryVisibility() {
+    this.db.exec(`
+      CREATE TABLE IF NOT EXISTS desktop_history_hidden (
+        privacy_scope_id TEXT NOT NULL,
+        desktop_transcription_id TEXT NOT NULL,
+        PRIMARY KEY (privacy_scope_id, desktop_transcription_id)
+      );
+      CREATE TABLE IF NOT EXISTS desktop_history_cleared (
+        privacy_scope_id TEXT PRIMARY KEY,
+        cleared_before TEXT NOT NULL
+      );
+    `);
+  }
+
+  isDesktopTranscriptionHidden(id, createdAt = null) {
+    this._ensureHistoryVisibility();
+    const scope = this._activePrivacyScope();
+    if (
+      this.db
+        .prepare(
+          "SELECT 1 FROM desktop_history_hidden WHERE privacy_scope_id = ? AND desktop_transcription_id = ?"
+        )
+        .get(scope, id)
+    )
+      return true;
+    const cutoff = this.db
+      .prepare("SELECT cleared_before FROM desktop_history_cleared WHERE privacy_scope_id = ?")
+      .get(scope)?.cleared_before;
+    return Boolean(cutoff && createdAt && Date.parse(createdAt) <= Date.parse(cutoff));
+  }
+
   upsertDesktopTranscription({
     id: desktopTranscriptionId,
     transcript,
@@ -953,6 +973,7 @@ class DatabaseManager {
       }
       if (typeof transcript !== "string") throw new Error("Desktop transcript is required");
       const privacyScope = this._activePrivacyScope();
+      if (this.isDesktopTranscriptionHidden(desktopTranscriptionId, createdAt)) return null;
       const existing = this.db
         .prepare(
           "SELECT * FROM transcriptions WHERE privacy_scope_id = ? AND desktop_transcription_id = ? LIMIT 1"
@@ -1046,82 +1067,67 @@ class DatabaseManager {
   }
 
   clearTranscriptions() {
-    try {
-      if (!this.db) {
-        throw new Error("Database not initialized");
-      }
-      const cloudRows = this.db
+    if (!this.db) throw new Error("Database not initialized");
+    this._ensureHistoryVisibility();
+    const scope = this._activePrivacyScope();
+    const rows = this.db
+      .prepare("SELECT id FROM transcriptions WHERE privacy_scope_id = ? AND deleted_at IS NULL")
+      .all(scope);
+    return this.db.transaction(() => {
+      // Also hide older server pages which have not been downloaded yet.
+      this.db
         .prepare(
-          "SELECT id, client_transcription_id FROM transcriptions WHERE cloud_id IS NOT NULL AND deleted_at IS NULL"
+          `INSERT INTO desktop_history_cleared (privacy_scope_id, cleared_before)
+        VALUES (?, ?) ON CONFLICT(privacy_scope_id) DO UPDATE SET cleared_before = excluded.cleared_before`
         )
-        .all();
-      const tombstone = this.db.prepare(
-        `UPDATE transcriptions SET text = ?, raw_text = ?, error_message = ?,
-         deleted_at = datetime('now'), sync_status = 'pending' WHERE id = ?`
-      );
-      const hardDelete = this.db.prepare("DELETE FROM transcriptions WHERE cloud_id IS NULL");
-      const clearAll = this.db.transaction(() => {
-        let changed = hardDelete.run().changes;
-        for (const row of cloudRows) {
-          const identity = this._transcriptionIdentity(row);
-          changed += tombstone.run(
-            this._protectTranscriptionField(identity, "text", ""),
-            this._protectTranscriptionField(identity, "raw_text", null),
-            this._protectTranscriptionField(identity, "error_message", null),
-            row.id
-          ).changes;
-        }
-        return changed;
-      });
-      return { cleared: clearAll(), success: true };
-    } catch (error) {
-      debugLogger.error("Error clearing transcriptions", { error: error.message }, "database");
-      throw error;
-    }
+        .run(scope, new Date().toISOString());
+      for (const row of rows) this.deleteTranscription(row.id);
+      return { cleared: rows.length, ids: rows.map((row) => row.id), success: true };
+    })();
   }
 
   deleteTranscription(id) {
-    try {
-      if (!this.db) {
-        throw new Error("Database not initialized");
+    if (!this.db) throw new Error("Database not initialized");
+    const scope = this._activePrivacyScope();
+    const row = this.db
+      .prepare(
+        "SELECT * FROM transcriptions WHERE id = ? AND privacy_scope_id = ? AND deleted_at IS NULL"
+      )
+      .get(id, scope);
+    if (!row) return { success: false, id };
+    this._ensureHistoryVisibility();
+    return this.db.transaction(() => {
+      if (row.desktop_transcription_id) {
+        this.db
+          .prepare(
+            "INSERT OR IGNORE INTO desktop_history_hidden (privacy_scope_id, desktop_transcription_id) VALUES (?, ?)"
+          )
+          .run(scope, row.desktop_transcription_id);
       }
-      const row = this.db
-        .prepare(
-          "SELECT id, client_transcription_id, cloud_id, deleted_at FROM transcriptions WHERE id = ?"
-        )
-        .get(id);
-      if (!row || row.deleted_at) return { success: false, id };
-      const stmt = row.cloud_id
-        ? this.db.prepare(
-            `UPDATE transcriptions SET text = ?, raw_text = ?, error_message = ?,
-             deleted_at = datetime('now'), sync_status = 'pending'
-             WHERE id = ? AND deleted_at IS NULL`
-          )
-        : this.db.prepare("DELETE FROM transcriptions WHERE id = ?");
-      const identity = this._transcriptionIdentity(row);
-      const result = row.cloud_id
-        ? stmt.run(
-            this._protectTranscriptionField(identity, "text", ""),
-            this._protectTranscriptionField(identity, "raw_text", null),
-            this._protectTranscriptionField(identity, "error_message", null),
-            id
-          )
-        : stmt.run(id);
+      // This API only removes the device copy. Keep an account-scoped marker so
+      // a subsequent server history refresh cannot restore a removed record.
+      const result = this.db
+        .prepare("DELETE FROM transcriptions WHERE id = ? AND privacy_scope_id = ?")
+        .run(id, scope);
       return { success: result.changes > 0, id };
-    } catch (error) {
-      debugLogger.error("Error deleting transcription", { error: error.message }, "database");
-      throw error;
-    }
+    })();
   }
 
   updateTranscriptionAudio(id, { hasAudio, audioDurationMs, provider, model }) {
     try {
       if (!this.db) throw new Error("Database not initialized");
       const stmt = this.db.prepare(
-        "UPDATE transcriptions SET has_audio = ?, audio_duration_ms = ?, provider = ?, model = ? WHERE id = ?"
+        "UPDATE transcriptions SET has_audio = ?, audio_duration_ms = ?, provider = ?, model = ? WHERE id = ? AND privacy_scope_id = ? AND deleted_at IS NULL"
       );
-      stmt.run(hasAudio, audioDurationMs, provider, model, id);
-      return { success: true };
+      const result = stmt.run(
+        hasAudio,
+        audioDurationMs,
+        provider,
+        model,
+        id,
+        this._activePrivacyScope()
+      );
+      return { success: result.changes > 0 };
     } catch (error) {
       debugLogger.error("Error updating transcription audio", { error: error.message }, "database");
       throw error;
@@ -1132,8 +1138,10 @@ class DatabaseManager {
     try {
       if (!this.db) throw new Error("Database not initialized");
       const row = this.db
-        .prepare("SELECT id, client_transcription_id FROM transcriptions WHERE id = ?")
-        .get(id);
+        .prepare(
+          "SELECT id, client_transcription_id FROM transcriptions WHERE id = ? AND privacy_scope_id = ? AND deleted_at IS NULL"
+        )
+        .get(id, this._activePrivacyScope());
       if (!row) return { success: false };
       const identity = this._transcriptionIdentity(row);
       const stmt = this.db.prepare("UPDATE transcriptions SET text = ?, raw_text = ? WHERE id = ?");
@@ -1153,8 +1161,10 @@ class DatabaseManager {
     try {
       if (!this.db) throw new Error("Database not initialized");
       const row = this.db
-        .prepare("SELECT id, client_transcription_id FROM transcriptions WHERE id = ?")
-        .get(id);
+        .prepare(
+          "SELECT id, client_transcription_id FROM transcriptions WHERE id = ? AND privacy_scope_id = ? AND deleted_at IS NULL"
+        )
+        .get(id, this._activePrivacyScope());
       if (!row) return { success: false };
       const stmt = this.db.prepare(
         "UPDATE transcriptions SET status = ?, error_message = ?, error_code = ? WHERE id = ?"
@@ -1184,7 +1194,7 @@ class DatabaseManager {
     try {
       if (!this.db) throw new Error("Database not initialized");
       const stmt = this.db.prepare(
-        "SELECT * FROM transcriptions WHERE id = ? AND privacy_scope_id = ?"
+        "SELECT * FROM transcriptions WHERE id = ? AND privacy_scope_id = ? AND deleted_at IS NULL"
       );
       return this._decodeTranscription(stmt.get(id, this._activePrivacyScope()) || null);
     } catch (error) {
@@ -1395,12 +1405,10 @@ class DatabaseManager {
   getDictionaryEntryByClientId(clientDictId) {
     try {
       if (!this.db) throw new Error("Database not initialized");
-      return (
-        this._decodeDictionaryRow(
-          this.db
+      return this._decodeDictionaryRow(
+        this.db
           .prepare("SELECT * FROM custom_dictionary WHERE client_dict_id = ?")
           .get(clientDictId) || null
-        )
       );
     } catch (error) {
       debugLogger.error(
@@ -1884,9 +1892,7 @@ class DatabaseManager {
         this._protectNoteField(identity, "title", title),
         this._protectNoteField(identity, "content", content),
         noteType,
-        sourceFile === null
-          ? null
-          : this._protectNoteField(identity, "source_file", sourceFile),
+        sourceFile === null ? null : this._protectNoteField(identity, "source_file", sourceFile),
         audioDuration,
         folderId,
         clientNoteId,
@@ -1908,8 +1914,10 @@ class DatabaseManager {
       if (!this.db) {
         throw new Error("Database not initialized");
       }
-      const stmt = this.db.prepare("SELECT * FROM notes WHERE id = ?");
-      return this._decodeNote(stmt.get(id) || null);
+      const stmt = this.db.prepare(
+        "SELECT * FROM notes WHERE id = ? AND privacy_scope_id = ? AND deleted_at IS NULL"
+      );
+      return this._decodeNote(stmt.get(id, this._activePrivacyScope()) || null);
     } catch (error) {
       debugLogger.error("Error getting note", { error: error.message }, "notes");
       throw error;
@@ -1922,9 +1930,9 @@ class DatabaseManager {
         throw new Error("Database not initialized");
       }
       const stmt = this.db.prepare(
-        "SELECT * FROM notes WHERE cloud_id = ? AND deleted_at IS NULL LIMIT 1"
+        "SELECT * FROM notes WHERE cloud_id = ? AND deleted_at IS NULL AND privacy_scope_id = ? LIMIT 1"
       );
-      return this._decodeNote(stmt.get(cloudId) || null);
+      return this._decodeNote(stmt.get(cloudId, this._activePrivacyScope()) || null);
     } catch (error) {
       debugLogger.error("Error getting note by cloud_id", { error: error.message }, "notes");
       throw error;
@@ -1936,8 +1944,8 @@ class DatabaseManager {
       if (!this.db) {
         throw new Error("Database not initialized");
       }
-      const conditions = ["deleted_at IS NULL"];
-      const params = [];
+      const conditions = ["deleted_at IS NULL", "privacy_scope_id = ?"];
+      const params = [this._activePrivacyScope()];
       if (noteType) {
         conditions.push("note_type = ?");
         params.push(noteType);
@@ -1980,14 +1988,16 @@ class DatabaseManager {
       const fields = [];
       const values = [];
       const current = this.db
-        .prepare("SELECT id, client_note_id FROM notes WHERE id = ?")
-        .get(id);
+        .prepare(
+          "SELECT id, client_note_id FROM notes WHERE id = ? AND privacy_scope_id = ? AND deleted_at IS NULL"
+        )
+        .get(id, this._activePrivacyScope());
       if (!current) return { success: false };
       const noteIdentity = {
         ...current,
-        privacy_scope_id: this.db
-          .prepare("SELECT privacy_scope_id FROM notes WHERE id = ?")
-          .get(id)?.privacy_scope_id || "device-local",
+        privacy_scope_id:
+          this.db.prepare("SELECT privacy_scope_id FROM notes WHERE id = ?").get(id)
+            ?.privacy_scope_id || "device-local",
       };
       for (const [key, value] of Object.entries(updates)) {
         if (allowedFields.includes(key) && value !== undefined) {
@@ -2070,6 +2080,17 @@ class DatabaseManager {
       const folder = this.db.prepare("SELECT * FROM folders WHERE id = ?").get(id);
       if (!folder) return { success: false, error: "Folder not found" };
       if (folder.is_default) return { success: false, error: "Cannot delete default folders" };
+      // Folders are device-level. Never cascade into another account's hidden notes.
+      if (
+        this.db
+          .prepare("SELECT 1 FROM notes WHERE folder_id = ? AND privacy_scope_id != ? LIMIT 1")
+          .get(id, this._activePrivacyScope())
+      ) {
+        return {
+          success: false,
+          error: "This folder contains notes from another local account profile.",
+        };
+      }
       const noteIds = this.db
         .prepare("SELECT id FROM notes WHERE folder_id = ?")
         .all(id)
@@ -2122,9 +2143,9 @@ class DatabaseManager {
       if (!this.db) throw new Error("Database not initialized");
       return this.db
         .prepare(
-          "SELECT folder_id, COUNT(*) as count FROM notes WHERE deleted_at IS NULL GROUP BY folder_id"
+          "SELECT folder_id, COUNT(*) as count FROM notes WHERE deleted_at IS NULL AND privacy_scope_id = ? GROUP BY folder_id"
         )
-        .all();
+        .all(this._activePrivacyScope());
     } catch (error) {
       debugLogger.error("Error getting folder note counts", { error: error.message }, "notes");
       throw error;
@@ -2219,9 +2240,9 @@ class DatabaseManager {
         throw new Error("Database not initialized");
       }
       const stmt = this.db.prepare(
-        "UPDATE notes SET deleted_at = datetime('now'), sync_status = 'pending', updated_at = datetime('now') WHERE id = ? AND deleted_at IS NULL"
+        "UPDATE notes SET deleted_at = datetime('now'), sync_status = 'pending', updated_at = datetime('now') WHERE id = ? AND deleted_at IS NULL AND privacy_scope_id = ?"
       );
-      const result = stmt.run(id);
+      const result = stmt.run(id, this._activePrivacyScope());
       return { success: result.changes > 0, id };
     } catch (error) {
       debugLogger.error("Error deleting note", { error: error.message }, "notes");
@@ -2232,6 +2253,7 @@ class DatabaseManager {
   createAgentConversation(title = "Untitled", noteId = null) {
     try {
       if (!this.db) throw new Error("Database not initialized");
+      if (noteId != null && !this.getNote(noteId)) throw new Error("Note not found");
       const clientConversationId = randomUUID();
       const privacyScopeId = this._activePrivacyScope();
       const identity = {
@@ -2254,7 +2276,9 @@ class DatabaseManager {
           privacyScopeId
         );
       return this._decodeConversation(
-        this.db.prepare("SELECT * FROM agent_conversations WHERE id = ?").get(result.lastInsertRowid)
+        this.db
+          .prepare("SELECT * FROM agent_conversations WHERE id = ?")
+          .get(result.lastInsertRowid)
       );
     } catch (error) {
       debugLogger.error("Error creating agent conversation", { error: error.message }, "database");
@@ -2267,16 +2291,16 @@ class DatabaseManager {
       if (!this.db) throw new Error("Database not initialized");
       return this.db
         .prepare(
-          `SELECT c.id, c.title, c.created_at, c.updated_at,
+          `SELECT c.id, c.title, c.created_at, c.updated_at, c.client_conversation_id, c.privacy_scope_id,
             COUNT(m.id) AS message_count
           FROM agent_conversations c
           LEFT JOIN agent_messages m ON m.conversation_id = c.id
-          WHERE c.note_id = ?
+          WHERE c.note_id = ? AND c.privacy_scope_id = ? AND c.deleted_at IS NULL
           GROUP BY c.id
           ORDER BY c.updated_at DESC
           LIMIT ?`
         )
-        .all(noteId, limit)
+        .all(noteId, this._activePrivacyScope(), limit)
         .map((row) => this._decodeConversation(row));
     } catch (error) {
       debugLogger.error(
@@ -2293,9 +2317,9 @@ class DatabaseManager {
       if (!this.db) throw new Error("Database not initialized");
       return this.db
         .prepare(
-          "SELECT * FROM agent_conversations WHERE deleted_at IS NULL ORDER BY updated_at DESC LIMIT ?"
+          "SELECT * FROM agent_conversations WHERE deleted_at IS NULL AND privacy_scope_id = ? ORDER BY updated_at DESC LIMIT ?"
         )
-        .all(limit)
+        .all(this._activePrivacyScope(), limit)
         .map((row) => this._decodeConversation(row));
     } catch (error) {
       debugLogger.error("Error getting agent conversations", { error: error.message }, "database");
@@ -2307,8 +2331,10 @@ class DatabaseManager {
     try {
       if (!this.db) throw new Error("Database not initialized");
       const conversation = this.db
-        .prepare("SELECT * FROM agent_conversations WHERE id = ?")
-        .get(id);
+        .prepare(
+          "SELECT * FROM agent_conversations WHERE id = ? AND privacy_scope_id = ? AND deleted_at IS NULL"
+        )
+        .get(id, this._activePrivacyScope());
       if (!conversation) return null;
       const messages = this.db
         .prepare("SELECT * FROM agent_messages WHERE conversation_id = ? ORDER BY created_at ASC")
@@ -2326,9 +2352,9 @@ class DatabaseManager {
       if (!this.db) throw new Error("Database not initialized");
       const result = this.db
         .prepare(
-          "UPDATE agent_conversations SET deleted_at = datetime('now'), sync_status = 'pending', updated_at = datetime('now') WHERE id = ?"
+          "UPDATE agent_conversations SET deleted_at = datetime('now'), sync_status = 'pending', updated_at = datetime('now') WHERE id = ? AND privacy_scope_id = ?"
         )
-        .run(id);
+        .run(id, this._activePrivacyScope());
       return { success: result.changes > 0 };
     } catch (error) {
       debugLogger.error("Error deleting agent conversation", { error: error.message }, "database");
@@ -2340,8 +2366,10 @@ class DatabaseManager {
     try {
       if (!this.db) throw new Error("Database not initialized");
       const conversation = this.db
-        .prepare("SELECT * FROM agent_conversations WHERE id = ?")
-        .get(id);
+        .prepare(
+          "SELECT * FROM agent_conversations WHERE id = ? AND privacy_scope_id = ? AND deleted_at IS NULL"
+        )
+        .get(id, this._activePrivacyScope());
       if (!conversation) return { success: false };
       this.db
         .prepare(
@@ -2434,8 +2462,10 @@ class DatabaseManager {
       if (!this.db) throw new Error("Database not initialized");
       const metadataStr = metadata ? JSON.stringify(metadata) : null;
       const conversation = this.db
-        .prepare("SELECT * FROM agent_conversations WHERE id = ?")
-        .get(conversationId);
+        .prepare(
+          "SELECT * FROM agent_conversations WHERE id = ? AND privacy_scope_id = ? AND deleted_at IS NULL"
+        )
+        .get(conversationId, this._activePrivacyScope());
       if (!conversation) throw new Error("Agent conversation not found");
       const clientMessageId = randomUUID();
       const messageIdentity = {
@@ -2632,15 +2662,7 @@ class DatabaseManager {
   }
 
   getAgentMessages(conversationId) {
-    try {
-      if (!this.db) throw new Error("Database not initialized");
-      return this.db
-        .prepare("SELECT * FROM agent_messages WHERE conversation_id = ? ORDER BY created_at ASC")
-        .all(conversationId);
-    } catch (error) {
-      debugLogger.error("Error getting agent messages", { error: error.message }, "database");
-      throw error;
-    }
+    return this.getAgentConversation(conversationId)?.messages || [];
   }
 
   getSelectedCalendars(accountEmail = null) {
@@ -2707,27 +2729,26 @@ class DatabaseManager {
   searchNotes(query, limit = 50) {
     try {
       if (!this.db) throw new Error("Database not initialized");
-      const tokens = String(query || "")
-        .normalize("NFKC")
-        .toLocaleLowerCase("und")
-        .match(/[\p{L}\p{N}_]+/gu) || [];
-      if (tokens.length === 0) return [];
-      const rows = this.db
-        .prepare("SELECT * FROM notes WHERE deleted_at IS NULL ORDER BY updated_at DESC")
-        .all();
-      const matches = [];
-      for (const row of rows) {
-        const note = this._decodeNote(row);
-        const words = [
-          note.title,
-          note.content,
-          note.enhanced_content,
-          note.enhancement_prompt,
-        ]
-          .join(" ")
+      const tokens =
+        String(query || "")
           .normalize("NFKC")
           .toLocaleLowerCase("und")
           .match(/[\p{L}\p{N}_]+/gu) || [];
+      if (tokens.length === 0) return [];
+      const rows = this.db
+        .prepare(
+          "SELECT * FROM notes WHERE deleted_at IS NULL AND privacy_scope_id = ? ORDER BY updated_at DESC"
+        )
+        .all(this._activePrivacyScope());
+      const matches = [];
+      for (const row of rows) {
+        const note = this._decodeNote(row);
+        const words =
+          [note.title, note.content, note.enhanced_content, note.enhancement_prompt]
+            .join(" ")
+            .normalize("NFKC")
+            .toLocaleLowerCase("und")
+            .match(/[\p{L}\p{N}_]+/gu) || [];
         if (tokens.every((token) => words.some((word) => word.startsWith(token)))) {
           matches.push(note);
           if (matches.length >= limit) break;
@@ -2767,15 +2788,22 @@ class DatabaseManager {
   getNoteByCalendarEventId(eventId, excludeNoteId = null) {
     try {
       if (!this.db) throw new Error("Database not initialized");
-      const base = "SELECT * FROM notes WHERE calendar_event_id = ? AND deleted_at IS NULL";
+      const base =
+        "SELECT * FROM notes WHERE calendar_event_id = ? AND deleted_at IS NULL AND privacy_scope_id = ?";
       if (excludeNoteId) {
         return (
           this._decodeNote(
-            this.db.prepare(`${base} AND id != ? LIMIT 1`).get(eventId, excludeNoteId)
+            this.db
+              .prepare(`${base} AND id != ? LIMIT 1`)
+              .get(eventId, this._activePrivacyScope(), excludeNoteId)
           ) || null
         );
       }
-      return this._decodeNote(this.db.prepare(`${base} LIMIT 1`).get(eventId)) || null;
+      return (
+        this._decodeNote(
+          this.db.prepare(`${base} LIMIT 1`).get(eventId, this._activePrivacyScope())
+        ) || null
+      );
     } catch (error) {
       debugLogger.error(
         "Error getting note by calendar event id",
@@ -3024,12 +3052,12 @@ class DatabaseManager {
             (SELECT client_message_id FROM agent_messages WHERE conversation_id = c.id ORDER BY created_at DESC LIMIT 1) AS last_message_client_id
           FROM agent_conversations c
           LEFT JOIN agent_messages m ON m.conversation_id = c.id
-          ${archiveFilter}
+          ${archiveFilter} AND c.privacy_scope_id = ?
           GROUP BY c.id
           ORDER BY c.updated_at DESC
           LIMIT ? OFFSET ?`
         )
-        .all(limit, offset)
+        .all(this._activePrivacyScope(), limit, offset)
         .map((row) => ({
           ...this._decodeConversation(row),
           last_message:
@@ -3056,7 +3084,10 @@ class DatabaseManager {
   searchAgentConversations(query, limit = 20) {
     try {
       if (!this.db) throw new Error("Database not initialized");
-      const needle = String(query || "").normalize("NFKC").toLocaleLowerCase("und").trim();
+      const needle = String(query || "")
+        .normalize("NFKC")
+        .toLocaleLowerCase("und")
+        .trim();
       if (!needle) return [];
       return this.getAgentConversationsWithPreview(1000, 0, false)
         .filter((conversation) => {
@@ -3085,10 +3116,12 @@ class DatabaseManager {
   archiveAgentConversation(id) {
     try {
       if (!this.db) throw new Error("Database not initialized");
-      this.db
-        .prepare("UPDATE agent_conversations SET archived_at = CURRENT_TIMESTAMP WHERE id = ?")
-        .run(id);
-      return { success: true };
+      const result = this.db
+        .prepare(
+          "UPDATE agent_conversations SET archived_at = CURRENT_TIMESTAMP WHERE id = ? AND privacy_scope_id = ? AND deleted_at IS NULL"
+        )
+        .run(id, this._activePrivacyScope());
+      return { success: result.changes > 0 };
     } catch (error) {
       debugLogger.error("Error archiving agent conversation", { error: error.message }, "database");
       throw error;
@@ -3098,8 +3131,12 @@ class DatabaseManager {
   unarchiveAgentConversation(id) {
     try {
       if (!this.db) throw new Error("Database not initialized");
-      this.db.prepare("UPDATE agent_conversations SET archived_at = NULL WHERE id = ?").run(id);
-      return { success: true };
+      const result = this.db
+        .prepare(
+          "UPDATE agent_conversations SET archived_at = NULL WHERE id = ? AND privacy_scope_id = ? AND deleted_at IS NULL"
+        )
+        .run(id, this._activePrivacyScope());
+      return { success: result.changes > 0 };
     } catch (error) {
       debugLogger.error(
         "Error unarchiving agent conversation",
@@ -3113,8 +3150,12 @@ class DatabaseManager {
   updateAgentConversationCloudId(id, cloudId) {
     try {
       if (!this.db) throw new Error("Database not initialized");
-      this.db.prepare("UPDATE agent_conversations SET cloud_id = ? WHERE id = ?").run(cloudId, id);
-      return { success: true };
+      const result = this.db
+        .prepare(
+          "UPDATE agent_conversations SET cloud_id = ? WHERE id = ? AND privacy_scope_id = ? AND deleted_at IS NULL"
+        )
+        .run(cloudId, id, this._activePrivacyScope());
+      return { success: result.changes > 0 };
     } catch (error) {
       debugLogger.error(
         "Error updating agent conversation cloud_id",
@@ -3295,6 +3336,7 @@ class DatabaseManager {
   setSpeakerMapping(noteId, speakerId, profileId, displayName) {
     try {
       if (!this.db) throw new Error("Database not initialized");
+      if (!this.getNote(noteId)) return { success: false };
       this.db
         .prepare(
           "INSERT OR REPLACE INTO speaker_mappings (note_id, speaker_id, profile_id, display_name) VALUES (?, ?, ?, ?)"
@@ -3310,6 +3352,7 @@ class DatabaseManager {
   getSpeakerMappings(noteId) {
     try {
       if (!this.db) throw new Error("Database not initialized");
+      if (!this.getNote(noteId)) return [];
       return this.db.prepare("SELECT * FROM speaker_mappings WHERE note_id = ?").all(noteId);
     } catch (error) {
       debugLogger.error("Error getting speaker mappings", { error: error.message }, "database");
@@ -3320,6 +3363,7 @@ class DatabaseManager {
   saveNoteSpeakerEmbeddings(noteId, embeddings) {
     try {
       if (!this.db) throw new Error("Database not initialized");
+      if (!this.getNote(noteId)) return { success: false };
       const transaction = this.db.transaction((entries) => {
         const stmt = this.db.prepare(
           "INSERT OR REPLACE INTO note_speaker_embeddings (note_id, speaker_id, embedding) VALUES (?, ?, ?)"
@@ -3343,6 +3387,7 @@ class DatabaseManager {
   getNoteSpeakerEmbeddings(noteId) {
     try {
       if (!this.db) throw new Error("Database not initialized");
+      if (!this.getNote(noteId)) return [];
       return this.db.prepare("SELECT * FROM note_speaker_embeddings WHERE note_id = ?").all(noteId);
     } catch (error) {
       debugLogger.error(
@@ -3415,24 +3460,24 @@ class DatabaseManager {
       const choose = (key) =>
         !hasValue(cloudNote[key]) && hasValue(existingClear?.[key])
           ? existingClear[key]
-          : cloudNote[key] ?? null;
+          : (cloudNote[key] ?? null);
       const cloudHasEnhancedContent = hasValue(cloudNote.enhanced_content);
       const existingHasEnhancedContent = hasValue(existingClear?.enhanced_content);
       const enhancedContent = cloudHasEnhancedContent
         ? cloudNote.enhanced_content
         : existingHasEnhancedContent
           ? existingClear.enhanced_content
-          : cloudNote.enhanced_content ?? null;
+          : (cloudNote.enhanced_content ?? null);
       const enhancementPrompt = cloudHasEnhancedContent
-        ? cloudNote.enhancement_prompt ?? null
+        ? (cloudNote.enhancement_prompt ?? null)
         : existingHasEnhancedContent
-          ? existingClear.enhancement_prompt ?? null
-          : cloudNote.enhancement_prompt ?? null;
+          ? (existingClear.enhancement_prompt ?? null)
+          : (cloudNote.enhancement_prompt ?? null);
       const enhancedAtContentHash = cloudHasEnhancedContent
-        ? cloudNote.enhanced_at_content_hash ?? null
+        ? (cloudNote.enhanced_at_content_hash ?? null)
         : existingHasEnhancedContent
-          ? existingClear.enhanced_at_content_hash ?? null
-          : cloudNote.enhanced_at_content_hash ?? null;
+          ? (existingClear.enhanced_at_content_hash ?? null)
+          : (cloudNote.enhanced_at_content_hash ?? null);
       const transcript = choose("transcript");
       const stmt = this.db.prepare(`
         INSERT INTO notes (client_note_id, cloud_id, title, content, enhanced_content,
@@ -3701,9 +3746,11 @@ class DatabaseManager {
     try {
       if (!this.db) throw new Error("Database not initialized");
       return (
-        this._decodeConversation(this.db
-          .prepare("SELECT * FROM agent_conversations WHERE client_conversation_id = ?")
-          .get(clientId)) || null
+        this._decodeConversation(
+          this.db
+            .prepare("SELECT * FROM agent_conversations WHERE client_conversation_id = ?")
+            .get(clientId)
+        ) || null
       );
     } catch (error) {
       debugLogger.error(
@@ -3953,91 +4000,119 @@ class DatabaseManager {
   }
 
   linkLocalTranscriptionToSync(id, accountId, recordId, version, source) {
-    const result = this.db.prepare(`
+    const result = this.db
+      .prepare(
+        `
       UPDATE transcriptions SET
         sync_account_id = ?, sync_record_id = ?, sync_version = ?, sync_source = ?,
         sync_status = 'pending'
       WHERE id = ? AND privacy_scope_id = ?
         AND (sync_account_id IS NULL OR sync_account_id = ?)
-    `).run(accountId, recordId, version, source, id, `account:${accountId}`, accountId);
+    `
+      )
+      .run(accountId, recordId, version, source, id, `account:${accountId}`, accountId);
     return { success: result.changes > 0 };
   }
 
   detachSyncedTranscriptMirror(id, accountId) {
-    const result = this.db.prepare(`
+    const result = this.db
+      .prepare(
+        `
       UPDATE transcriptions SET
         sync_account_id = NULL, sync_record_id = NULL, sync_version = NULL,
         sync_source = NULL, cloud_id = NULL, sync_status = 'pending'
       WHERE id = ? AND sync_account_id = ?
-    `).run(id, accountId);
+    `
+      )
+      .run(id, accountId);
     return { success: result.changes > 0 };
   }
 
   deleteSyncedTranscriptMirror(id, accountId) {
-    const result = this.db.prepare(
-      "DELETE FROM transcriptions WHERE id = ? AND sync_account_id = ?"
-    ).run(id, accountId);
+    const result = this.db
+      .prepare("DELETE FROM transcriptions WHERE id = ? AND sync_account_id = ?")
+      .run(id, accountId);
     return { success: result.changes > 0 };
   }
 
   upsertSyncedTranscriptMirror(accountId, record) {
-    const current = this.db.prepare(`
+    const current = this.db
+      .prepare(
+        `
       SELECT * FROM transcriptions WHERE sync_account_id = ? AND sync_record_id = ?
-    `).get(accountId, record.id);
+    `
+      )
+      .get(accountId, record.id);
     if (current) {
       const identity = this._transcriptionIdentity(current);
-      this.db.prepare(`
+      this.db
+        .prepare(
+          `
         UPDATE transcriptions SET
           text = ?, raw_text = ?, status = 'completed', cloud_id = ?,
           sync_status = 'synced', sync_version = ?, sync_source = ?,
           deleted_at = NULL
         WHERE id = ? AND sync_account_id = ?
-      `).run(
-        this._protectTranscriptionField(identity, "text", record.text),
-        this._protectTranscriptionField(identity, "raw_text", record.text),
-        record.id,
-        record.version,
-        record.source,
-        current.id,
-        accountId
-      );
+      `
+        )
+        .run(
+          this._protectTranscriptionField(identity, "text", record.text),
+          this._protectTranscriptionField(identity, "raw_text", record.text),
+          record.id,
+          record.version,
+          record.source,
+          current.id,
+          accountId
+        );
       return this._decodeTranscription(
         this.db.prepare("SELECT * FROM transcriptions WHERE id = ?").get(current.id)
       );
     }
     const clientId = randomUUID();
-    const result = this.db.prepare(`
+    const result = this.db
+      .prepare(
+        `
       INSERT INTO transcriptions (
         text, raw_text, status, route_kind, client_transcription_id, cloud_id,
         sync_status, sync_account_id, sync_record_id, sync_version, sync_source
       ) VALUES (?, ?, 'completed', 'desktop-sync', ?, ?, 'synced', ?, ?, ?, ?)
-    `).run(
-      this._protectTranscriptionField(clientId, "text", record.text),
-      this._protectTranscriptionField(clientId, "raw_text", record.text),
-      clientId,
-      record.id,
-      accountId,
-      record.id,
-      record.version,
-      record.source
-    );
+    `
+      )
+      .run(
+        this._protectTranscriptionField(clientId, "text", record.text),
+        this._protectTranscriptionField(clientId, "raw_text", record.text),
+        clientId,
+        record.id,
+        accountId,
+        record.id,
+        record.version,
+        record.source
+      );
     return this._decodeTranscription(
       this.db.prepare("SELECT * FROM transcriptions WHERE id = ?").get(result.lastInsertRowid)
     );
   }
 
   remapSyncedTranscriptMirror(accountId, oldRecordId, newRecordId) {
-    this.db.prepare(`
+    this.db
+      .prepare(
+        `
       UPDATE transcriptions SET sync_record_id = ?, cloud_id = ?
       WHERE sync_account_id = ? AND sync_record_id = ?
-    `).run(newRecordId, newRecordId, accountId, oldRecordId);
+    `
+      )
+      .run(newRecordId, newRecordId, accountId, oldRecordId);
   }
 
   updateSyncedTranscriptVersion(accountId, recordId, version) {
-    this.db.prepare(`
+    this.db
+      .prepare(
+        `
       UPDATE transcriptions SET sync_version = ?, sync_status = 'synced'
       WHERE sync_account_id = ? AND sync_record_id = ?
-    `).run(version, accountId, recordId);
+    `
+      )
+      .run(version, accountId, recordId);
   }
 
   getNotesWithUnmappedSpeakers() {

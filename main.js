@@ -1012,6 +1012,9 @@ async function startApp() {
 
   const { powerMonitor } = require("electron");
   powerMonitor.on("resume", () => {
+    if (process.env.NODE_ENV !== "development") {
+      void updateManager?.checkForUpdatesInBackground();
+    }
     if (googleCalendarManager) {
       googleCalendarManager.onWakeFromSleep();
     }
@@ -1615,9 +1618,7 @@ if (gotSingleInstanceLock) {
   });
 
   let isShuttingDown = false;
-  app.on("before-quit", (event) => {
-    if (isShuttingDown) return;
-    isShuttingDown = true;
+  const sealLocalData = () => {
     try {
       databaseManager?.sealAtRest?.();
     } catch (error) {
@@ -1625,7 +1626,13 @@ if (gotSingleInstanceLock) {
         error: error?.message,
       });
     }
+  };
+  app.on("before-quit", (event) => {
     if (updateManager && updateManager.isQuittingForUpdate) {
+      isShuttingDown = true;
+      // installUpdate has already drained authentication before asking the
+      // native updater to quit. Its quit event must remain unblocked.
+      sealLocalData();
       // Quit must proceed for the installer to run, so no preventDefault;
       // sidecar shutdown is best-effort (the reaper cleans up orphans on relaunch).
       performSyncTeardown();
@@ -1633,8 +1640,16 @@ if (gotSingleInstanceLock) {
       return;
     }
     event.preventDefault();
+    if (isShuttingDown) return;
+    isShuttingDown = true;
+    const authDrain = desktopAuthManager?.drainRefreshForShutdown();
     performSyncTeardown();
-    sidecarRegistry.shutdownAll().finally(() => app.exit(0));
+    Promise.allSettled([authDrain, sidecarRegistry.shutdownAll()]).then(() => {
+      // Refresh completion publishes auth state to database-backed listeners,
+      // so keep SQLite open until the rotating credential has been persisted.
+      sealLocalData();
+      app.exit(0);
+    });
   });
 }
 
