@@ -1,101 +1,136 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { ArrowRight, Check, FileText, Mic, Monitor, Moon, Shield, Sun } from "lucide-react";
-import { Button } from "./ui/button";
-import AuthenticationStep from "./AuthenticationStep";
-import { HotkeyInput } from "./ui/HotkeyInput";
+import { ArrowLeft, Check } from "lucide-react";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "./ui/select";
 import { useHotkeyRegistration } from "../hooks/useHotkeyRegistration";
 import { usePermissions } from "../hooks/usePermissions";
-import { useSystemAudioPermission } from "../hooks/useSystemAudioPermission";
 import { useSettingsStore } from "../stores/settingsStore";
 import { useAuth } from "../hooks/useAuth";
-import { formatHotkeyLabelForPlatform, getDefaultHotkey } from "../utils/hotkeys";
+import { formatHotkeyLabel, getDefaultHotkey } from "../utils/hotkeys";
 import { getPlatform } from "../utils/platform";
-import { canManageSystemAudioInApp } from "../utils/systemAudioAccess";
 import wordmark from "../assets/voicelab.svg";
-import onboardingEndImage from "../assets/bg/3cf7eb296abc1ebbce4daafaf641a4f0.jpg";
 import {
+  ONBOARDING_SECTIONS,
   ONBOARDING_STEP_KEY,
   ONBOARDING_STEPS,
   clearOnboardingProgress,
   readOnboardingStep,
+  sectionIndexForStep,
   type OnboardingStep,
 } from "../constants/onboarding";
+import { OnbButton } from "./onboarding/ui";
+import WelcomeStep from "./onboarding/WelcomeStep";
+import SignInStep from "./onboarding/SignInStep";
+import AboutYouStep from "./onboarding/AboutYouStep";
+import TypingPlacesStep from "./onboarding/TypingPlacesStep";
+import PrivacyStep from "./onboarding/PrivacyStep";
+import PermissionsStep from "./onboarding/PermissionsStep";
+import MicTestStep from "./onboarding/MicTestStep";
+import ShortcutStep from "./onboarding/ShortcutStep";
+import LanguageStep from "./onboarding/LanguageStep";
+import TryItIntroStep from "./onboarding/TryItIntroStep";
+import TryItStep, { type DictationStats } from "./onboarding/TryItStep";
+import TimeSavingsStep from "./onboarding/TimeSavingsStep";
+import WritingNeedsStep from "./onboarding/WritingNeedsStep";
+import PersonalizeIntroStep from "./onboarding/PersonalizeIntroStep";
+import StyleStep from "./onboarding/StyleStep";
+import DoneStep from "./onboarding/DoneStep";
 
 interface OnboardingFlowProps {
   onComplete: (options?: { openSettings?: boolean }) => void;
 }
 
-type ViewTransitionDocument = Document & {
-  startViewTransition?: (update: () => void) => void;
-};
-
 type IntroPhase = "blank-before" | "mark" | "blank-after" | "complete";
 
-const ONBOARDING_UI_LANGUAGES = [
-  { value: "uz", label: "O‘zbekcha", flag: "🇺🇿" },
-  { value: "en", label: "English", flag: "🇺🇸" },
-  { value: "ru", label: "Русский", flag: "🇷🇺" },
-] as const;
+interface StepConfig {
+  /** "always": Continue is enabled on arrival. "gated": the step reports readiness. */
+  ready: "always" | "gated";
+  /** Offer a Skip action while the step is not ready yet. */
+  skippable?: boolean;
+  /** The step draws its own call to action instead of the shared footer. */
+  ownCta?: boolean;
+}
 
-const ONBOARDING_THEMES = [
-  { value: "light", icon: Sun, labelKey: "desktop.onboarding.personalize.light" },
-  { value: "dark", icon: Moon, labelKey: "desktop.onboarding.personalize.dark" },
-  { value: "auto", icon: Monitor, labelKey: "desktop.onboarding.personalize.system" },
+const STEP_CONFIG: Record<OnboardingStep, StepConfig> = {
+  welcome: { ready: "always", ownCta: true },
+  signin: { ready: "gated" },
+  "about-you": { ready: "always", skippable: true },
+  "typing-places": { ready: "always", skippable: true },
+  privacy: { ready: "always" },
+  permissions: { ready: "gated" },
+  "mic-test": { ready: "gated", skippable: true },
+  shortcut: { ready: "gated" },
+  language: { ready: "always" },
+  "try-it-intro": { ready: "always", ownCta: true },
+  "try-it-message": { ready: "gated", skippable: true },
+  "try-it-email": { ready: "gated", skippable: true },
+  "try-it-list": { ready: "gated", skippable: true },
+  "time-savings": { ready: "always" },
+  "writing-needs": { ready: "always", skippable: true },
+  "personalize-intro": { ready: "always", ownCta: true },
+  "style-personal": { ready: "always", skippable: true },
+  "style-work": { ready: "always", skippable: true },
+  "style-email": { ready: "always", skippable: true },
+  "style-other": { ready: "always", skippable: true },
+  finish: { ready: "gated" },
+};
+
+const UI_LANGUAGES = [
+  { value: "uz", label: "O‘zbekcha" },
+  { value: "en", label: "English" },
+  { value: "ru", label: "Русский" },
 ] as const;
 
 const ONBOARDING_NAV_BUTTON_CLASS = "min-w-28";
 
-function updateWithViewTransition(update: () => void) {
-  const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-  const startViewTransition = (document as ViewTransitionDocument).startViewTransition;
+function firstNameOf(name: string | null | undefined): string | null {
+  const trimmed = name?.trim();
+  if (!trimmed) return null;
+  return trimmed.split(/\s+/)[0] || null;
+}
 
-  if (reducedMotion || !startViewTransition) {
-    update();
-    return;
-  }
-
-  startViewTransition.call(document, update);
+function isTypingTarget(target: EventTarget | null): boolean {
+  if (!(target instanceof HTMLElement)) return false;
+  return (
+    target.tagName === "TEXTAREA" ||
+    target.tagName === "INPUT" ||
+    target.tagName === "SELECT" ||
+    target.isContentEditable
+  );
 }
 
 export default function OnboardingFlow({ onComplete }: OnboardingFlowProps) {
   const { t } = useTranslation();
   const [step, setStep] = useState<OnboardingStep>(readOnboardingStep);
+  const [direction, setDirection] = useState<"forward" | "back">("forward");
   const [introPhase, setIntroPhase] = useState<IntroPhase>("blank-before");
-  const uiLanguage = useSettingsStore((state) => state.uiLanguage);
-  const theme = useSettingsStore((state) => state.theme);
-  const setUiLanguage = useSettingsStore((state) => state.setUiLanguage);
-  const setTheme = useSettingsStore((state) => state.setTheme);
+  const [stepReady, setStepReady] = useState(false);
+  const [dictationStats, setDictationStats] = useState<DictationStats | null>(null);
+  const contentRef = useRef<HTMLDivElement>(null);
+
   const dictationKey = useSettingsStore((state) => state.dictationKey);
   const setDictationKey = useSettingsStore((state) => state.setDictationKey);
-  const systemAudioCaptureEnabled = useSettingsStore((state) => state.systemAudioCaptureEnabled);
-  const setSystemAudioCaptureEnabled = useSettingsStore(
-    (state) => state.setSystemAudioCaptureEnabled
-  );
+  const activationMode = useSettingsStore((state) => state.activationMode);
+  const uiLanguage = useSettingsStore((state) => state.uiLanguage);
+  const setUiLanguage = useSettingsStore((state) => state.setUiLanguage);
+
   const platform = getPlatform();
   const needsTextInsertionPermission = platform === "darwin";
   const [hotkey, setHotkey] = useState(
-    () =>
-      localStorage.getItem("hotkey") ||
-      dictationKey ||
-      (platform === "darwin" ? "Fn" : getDefaultHotkey())
+    () => localStorage.getItem("hotkey") || dictationKey || getDefaultHotkey()
   );
-  const [showPermissionNotice, setShowPermissionNotice] = useState(false);
-  const permissions = usePermissions(() => setShowPermissionNotice(true));
-  const systemAudio = useSystemAudioPermission();
+  const hotkeyLabel = formatHotkeyLabel(hotkey);
+
+  const permissions = usePermissions();
   const { registerHotkey, isRegistering } = useHotkeyRegistration();
-  const { isSignedIn } = useAuth();
-  const shouldShowSystemAudioPermission = canManageSystemAudioInApp(systemAudio);
-
-  const setupPermissionsGranted =
-    permissions.micPermissionGranted &&
-    (!needsTextInsertionPermission || permissions.accessibilityPermissionGranted);
-
-  useEffect(() => {
-    if (setupPermissionsGranted) setShowPermissionNotice(false);
-  }, [setupPermissionsGranted]);
+  const { isSignedIn, user } = useAuth();
 
   const stepIndex = ONBOARDING_STEPS.indexOf(step);
+  const sectionIndex = sectionIndexForStep(step);
+  const isLastStep = stepIndex === ONBOARDING_STEPS.length - 1;
+  const config = STEP_CONFIG[step];
+  const progress = ((stepIndex + 1) / ONBOARDING_STEPS.length) * 100;
+
   useEffect(() => {
     if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
       setIntroPhase("complete");
@@ -113,14 +148,28 @@ export default function OnboardingFlow({ onComplete }: OnboardingFlowProps) {
     return () => window.clearTimeout(timer);
   }, [introPhase]);
 
-  const go = useCallback((next: OnboardingStep) => {
-    updateWithViewTransition(() => {
+  const go = useCallback(
+    (next: OnboardingStep) => {
+      const nextIndex = ONBOARDING_STEPS.indexOf(next);
+      setDirection(nextIndex >= stepIndex ? "forward" : "back");
       localStorage.setItem(ONBOARDING_STEP_KEY, next);
+      setStepReady(false);
       setStep(next);
-    });
-  }, []);
+      contentRef.current?.scrollTo({ top: 0 });
+    },
+    [stepIndex]
+  );
+
+  const goNext = useCallback(() => {
+    go(ONBOARDING_STEPS[Math.min(ONBOARDING_STEPS.length - 1, stepIndex + 1)]);
+  }, [go, stepIndex]);
+
+  const goBack = useCallback(() => {
+    go(ONBOARDING_STEPS[Math.max(0, stepIndex - 1)]);
+  }, [go, stepIndex]);
 
   const finish = useCallback(() => {
+    if (!isSignedIn) return;
     const state = useSettingsStore.getState();
     state.setCloudTranscriptionForAllScopes({
       useLocalWhisper: false,
@@ -130,20 +179,58 @@ export default function OnboardingFlow({ onComplete }: OnboardingFlowProps) {
     useSettingsStore.setState({ transcriptionMode: "openwhispr" });
     clearOnboardingProgress();
     onComplete();
-  }, [onComplete]);
+  }, [isSignedIn, onComplete]);
 
+  // Signing in finishes the account step on its own.
   useEffect(() => {
-    if (step !== "ready" || !isSignedIn) return undefined;
+    if (step !== "signin" || !isSignedIn) return undefined;
+    const timer = window.setTimeout(goNext, 1100);
+    return () => window.clearTimeout(timer);
+  }, [goNext, isSignedIn, step]);
 
-    finish();
-    return undefined;
-  }, [finish, isSignedIn, step]);
+  const handleHotkeyChange = useCallback(
+    async (value: string) => {
+      const registered = await registerHotkey(value);
+      if (registered) {
+        setHotkey(value);
+        setDictationKey(value);
+        localStorage.setItem("hotkey", value);
+      }
+      return registered;
+    },
+    [registerHotkey, setDictationKey]
+  );
+
+  const handleDictationComplete = useCallback((stats: DictationStats) => {
+    setDictationStats((current) => current ?? stats);
+  }, []);
 
   const canContinue =
-    step === "welcome" ||
-    step === "mode" ||
-    step === "language-permissions" ||
-    (step === "hotkey" && setupPermissionsGranted);
+    config.ready === "always" ||
+    stepReady ||
+    (step === "signin" && isSignedIn) ||
+    (step === "finish" && isSignedIn);
+
+  const primaryAction = isLastStep ? finish : goNext;
+  const primaryLabel = useMemo(() => {
+    if (step === "finish") return t("desktop.onboarding.nav.finish");
+    return t("common.continue");
+  }, [step, t]);
+
+  // Enter advances whenever the shared footer is visible and the step is ready.
+  useEffect(() => {
+    if (config.ownCta) return undefined;
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== "Enter" || event.repeat || isTypingTarget(event.target)) return;
+      if (!canContinue) return;
+      event.preventDefault();
+      primaryAction();
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [canContinue, config.ownCta, primaryAction]);
+
+  const firstName = firstNameOf(user?.name) ?? firstNameOf(user?.email?.split("@")[0]);
 
   if (introPhase !== "complete") {
     return (
@@ -160,424 +247,194 @@ export default function OnboardingFlow({ onComplete }: OnboardingFlowProps) {
     );
   }
 
+  const content = (() => {
+    switch (step) {
+      case "welcome":
+        return <WelcomeStep onStart={goNext} />;
+      case "signin":
+        return <SignInStep isSignedIn={isSignedIn} />;
+      case "about-you":
+        return <AboutYouStep />;
+      case "typing-places":
+        return <TypingPlacesStep />;
+      case "privacy":
+        return <PrivacyStep />;
+      case "permissions":
+        return (
+          <PermissionsStep
+            permissions={permissions}
+            needsTextInsertionPermission={needsTextInsertionPermission}
+            onReadyChange={setStepReady}
+          />
+        );
+      case "mic-test":
+        return <MicTestStep onReadyChange={setStepReady} />;
+      case "shortcut":
+        return (
+          <ShortcutStep
+            hotkey={hotkey}
+            activationMode={activationMode}
+            isRegistering={isRegistering}
+            onHotkeyChange={handleHotkeyChange}
+            onReadyChange={setStepReady}
+            onConfirm={goNext}
+          />
+        );
+      case "language":
+        return <LanguageStep />;
+      case "try-it-intro":
+        return <TryItIntroStep hotkey={hotkey} activationMode={activationMode} onStart={goNext} />;
+      case "try-it-message":
+      case "try-it-email":
+      case "try-it-list":
+        return (
+          <TryItStep
+            key={step}
+            variant={
+              step === "try-it-message" ? "message" : step === "try-it-email" ? "email" : "list"
+            }
+            hotkey={hotkey}
+            activationMode={activationMode}
+            firstName={firstName}
+            onComplete={handleDictationComplete}
+            onReadyChange={setStepReady}
+          />
+        );
+      case "time-savings":
+        return <TimeSavingsStep stats={dictationStats} />;
+      case "writing-needs":
+        return <WritingNeedsStep />;
+      case "personalize-intro":
+        return <PersonalizeIntroStep onContinue={goNext} onLater={() => go("finish")} />;
+      case "style-personal":
+      case "style-work":
+      case "style-email":
+      case "style-other":
+        return <StyleStep key={step} context={step.replace("style-", "") as never} />;
+      case "finish":
+        return <DoneStep isSignedIn={isSignedIn} hotkey={hotkey} activationMode={activationMode} />;
+      default:
+        return null;
+    }
+  })();
+
   return (
-    <div className="flex min-h-screen items-center justify-center bg-muted/35 px-5 py-5 text-foreground animate-[onboarding-content-in_1000ms_cubic-bezier(0.22,1,0.36,1)_both]">
-      <section className="relative flex h-[34rem] w-[54rem] max-w-full flex-col overflow-hidden rounded-xl border border-border bg-card shadow-[0_2px_8px_rgba(0,0,0,0.06)] dark:shadow-[0_2px_8px_rgba(0,0,0,0.22)]">
-        {step === "ready" ? (
-          <div className="grid flex-1 grid-cols-[minmax(0,0.86fr)_minmax(0,1.14fr)]">
-            <div className="relative min-w-0 bg-muted/30">
-              <img src={onboardingEndImage} alt="" className="h-full w-full object-cover" />
-              <img
-                src={wordmark}
-                alt="VoiceLab"
-                className="absolute left-7 top-7 h-6 w-auto max-w-40"
-              />
-              <p className="absolute bottom-7 left-7 max-w-44 text-sm leading-5 text-black/80">
-                Make every word sound like it belongs.
-              </p>
-            </div>
-            <div className="flex min-w-0 flex-col px-7 py-8 sm:px-12">
-              <nav
-                className="absolute left-1/2 top-8 z-10 flex -translate-x-1/2 justify-center gap-1.5"
-                aria-label="Onboarding progress"
-              >
-                {ONBOARDING_STEPS.map((id, index) => (
-                  <span
-                    key={id}
-                    className={`h-1.5 rounded-full transition-colors duration-150 ${
-                      index === stepIndex
-                        ? "w-5 bg-foreground"
-                        : index < stepIndex
-                          ? "w-1.5 bg-foreground/50"
-                          : "w-1.5 bg-border"
+    <div className="onboarding-root flex min-h-screen items-center justify-center bg-muted/35 px-5 py-5 text-foreground animate-[onboarding-content-in_800ms_cubic-bezier(0.22,1,0.36,1)_both]">
+      <section className="relative flex h-[min(42rem,calc(100vh-2.5rem))] w-[66rem] max-w-full overflow-hidden rounded-xl border border-border bg-card shadow-[0_2px_8px_rgba(0,0,0,0.06)] dark:shadow-[0_2px_8px_rgba(0,0,0,0.22)]">
+        <aside className="flex w-52 shrink-0 flex-col border-r border-border bg-muted/40 px-5 py-6">
+          <img src={wordmark} alt="VoiceLab" className="h-5 w-auto self-start dark:invert" />
+          <nav className="mt-8 flex-1" aria-label={t("desktop.onboarding.nav.progress")}>
+            <ol className="space-y-1">
+              {ONBOARDING_SECTIONS.map((section, index) => {
+                const state =
+                  index < sectionIndex ? "done" : index === sectionIndex ? "active" : "upcoming";
+                return (
+                  <li
+                    key={section.id}
+                    aria-current={state === "active" ? "step" : undefined}
+                    className={`flex items-center gap-3 rounded-lg px-2 py-2 text-sm transition-colors duration-200 ${
+                      state === "active"
+                        ? "bg-background font-medium text-foreground shadow-sm"
+                        : state === "done"
+                          ? "text-foreground/70"
+                          : "text-muted-foreground"
                     }`}
-                    aria-label={`${index + 1}. ${t(`desktop.onboarding.progress.${id}`)}`}
-                    aria-current={index === stepIndex ? "step" : undefined}
-                  />
-                ))}
-              </nav>
-              <main className="flex min-h-0 flex-1 overflow-hidden">
-                {!isSignedIn && (
-                  <div className="m-auto w-full max-w-sm">
-                    <AuthenticationStep onAuthComplete={() => {}} />
-                  </div>
-                )}
-              </main>
-              {!isSignedIn && (
-                <footer className="flex h-14 shrink-0 items-end justify-center">
-                  <div className="flex items-center justify-center gap-3">
-                    <Button
-                      variant="ghost"
-                      size="lg"
-                      className={ONBOARDING_NAV_BUTTON_CLASS}
-                      onClick={() => go(ONBOARDING_STEPS[Math.max(0, stepIndex - 1)])}
+                  >
+                    <span
+                      className={`flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-2xs font-semibold transition-colors duration-200 ${
+                        state === "done"
+                          ? "bg-primary text-primary-foreground"
+                          : state === "active"
+                            ? "border-2 border-primary text-foreground"
+                            : "border border-border text-muted-foreground"
+                      }`}
                     >
-                      {t("common.back")}
-                    </Button>
-                  </div>
-                </footer>
+                      {state === "done" ? <Check className="h-3 w-3" strokeWidth={3} /> : index + 1}
+                    </span>
+                    {t(`desktop.onboarding.sections.${section.id}`)}
+                  </li>
+                );
+              })}
+            </ol>
+          </nav>
+          <div className="space-y-3">
+            <Select value={uiLanguage} onValueChange={setUiLanguage}>
+              <SelectTrigger
+                className="h-8 w-full rounded-lg text-xs"
+                aria-label={t("desktop.onboarding.nav.uiLanguage")}
+              >
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {UI_LANGUAGES.map((language) => (
+                  <SelectItem key={language.value} value={language.value}>
+                    {language.label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <p className="text-2xs leading-4 text-muted-foreground">
+              {t("desktop.onboarding.nav.stepCount", {
+                current: stepIndex + 1,
+                total: ONBOARDING_STEPS.length,
+              })}
+            </p>
+          </div>
+        </aside>
+
+        <div className="flex min-w-0 flex-1 flex-col">
+          <div className="h-0.5 w-full shrink-0 bg-border/60" aria-hidden="true">
+            <div
+              className="h-full bg-primary transition-[width] duration-700 ease-[cubic-bezier(0.22,1,0.36,1)]"
+              style={{ width: `${progress}%` }}
+            />
+          </div>
+
+          <main className="min-h-0 flex-1 overflow-hidden">
+            <div
+              ref={contentRef}
+              key={step}
+              data-direction={direction}
+              className="onboarding-step-enter flex h-full flex-col items-center justify-center px-8 py-6"
+            >
+              {content}
+            </div>
+          </main>
+
+          <footer className="flex h-16 shrink-0 items-center justify-between border-t border-border px-6">
+            <div>
+              {stepIndex > 0 && (
+                <OnbButton variant="ghost" className={ONBOARDING_NAV_BUTTON_CLASS} onClick={goBack}>
+                  <ArrowLeft className="h-4 w-4" strokeWidth={2} />
+                  {t("common.back")}
+                </OnbButton>
               )}
             </div>
-          </div>
-        ) : step === "welcome" || step === "mode" ? (
-          <div className="flex flex-1 flex-col px-7 py-8 sm:px-12">
-            <nav className="flex justify-center gap-1.5" aria-label="Onboarding progress">
-              {ONBOARDING_STEPS.map((id, index) => (
-                <span
-                  key={id}
-                  className={`h-1.5 rounded-full transition-colors duration-150 ${
-                    index === stepIndex ? "w-5 bg-foreground" : "w-1.5 bg-border"
-                  }`}
-                  aria-label={`${index + 1}. ${t(`desktop.onboarding.progress.${id}`)}`}
-                  aria-current={index === stepIndex ? "step" : undefined}
-                />
-              ))}
-            </nav>
-            <div className="flex flex-1 flex-col items-center justify-center text-center">
-              {step === "welcome" ? (
-                <>
-                  <img src={wordmark} alt="VoiceLab" className="h-9 w-auto dark:invert" />
-                  <p className="mt-6 text-sm text-muted-foreground">
-                    {t("desktop.onboarding.progress.welcome")}
-                  </p>
-                </>
-              ) : (
-                <div className="w-full max-w-xl">
-                  <h1 className="text-2xl font-semibold tracking-tight">
-                    {t("desktop.onboarding.howItWorks.title")}
-                  </h1>
-                  <p className="mx-auto mt-3 max-w-sm text-sm leading-6 text-muted-foreground">
-                    {t("desktop.onboarding.howItWorks.description")}
-                  </p>
-                  <div
-                    className="mx-auto mt-10 grid max-w-md grid-cols-[1fr_auto_1fr_auto_1fr] items-center gap-3"
-                    role="img"
-                    aria-label={t("desktop.onboarding.howItWorks.title")}
-                  >
-                    <div className="flex flex-col items-center gap-3">
-                      <Mic className="h-7 w-7" strokeWidth={1.5} />
-                      <span className="text-xs font-medium text-muted-foreground">
-                        {t("desktop.onboarding.howItWorks.speak")}
-                      </span>
-                    </div>
-                    <ArrowRight className="h-4 w-4 text-muted-foreground/50" strokeWidth={1.5} />
-                    <div className="flex flex-col items-center gap-3">
-                      <img src={wordmark} alt="" className="h-6 w-auto dark:invert" />
-                      <span className="text-xs font-medium text-muted-foreground">
-                        {t("desktop.onboarding.howItWorks.voicelab")}
-                      </span>
-                    </div>
-                    <ArrowRight className="h-4 w-4 text-muted-foreground/50" strokeWidth={1.5} />
-                    <div className="flex flex-col items-center gap-3">
-                      <FileText className="h-7 w-7" strokeWidth={1.5} />
-                      <span className="text-xs font-medium text-muted-foreground">
-                        {t("desktop.onboarding.howItWorks.text")}
-                      </span>
-                    </div>
-                  </div>
-                </div>
-              )}
-            </div>
-            <footer className="flex h-14 shrink-0 items-end justify-center">
-              <div className="flex items-center justify-center gap-3">
-                {stepIndex > 0 && (
-                  <Button
+            {!config.ownCta && (
+              <div className="flex items-center gap-2">
+                {config.skippable && !canContinue && (
+                  <OnbButton
                     variant="ghost"
-                    size="lg"
                     className={ONBOARDING_NAV_BUTTON_CLASS}
-                    onClick={() => go(ONBOARDING_STEPS[Math.max(0, stepIndex - 1)])}
+                    onClick={goNext}
+                    data-testid="onboarding-skip"
                   >
-                    {t("common.back")}
-                  </Button>
+                    {t("common.skip")}
+                  </OnbButton>
                 )}
-                <Button
-                  size="lg"
-                  className={ONBOARDING_NAV_BUTTON_CLASS}
-                  onClick={() =>
-                    go(ONBOARDING_STEPS[Math.min(ONBOARDING_STEPS.length - 1, stepIndex + 1)])
-                  }
-                >
-                  {t("common.next")}
-                </Button>
-              </div>
-            </footer>
-          </div>
-        ) : (
-          <div className="flex flex-1 flex-col px-7 py-8 sm:px-12">
-            <nav className="flex justify-center gap-1.5" aria-label="Onboarding progress">
-              {ONBOARDING_STEPS.map((id, index) => (
-                <span
-                  key={id}
-                  className={`h-1.5 rounded-full transition-colors duration-150 ${
-                    index === stepIndex
-                      ? "w-5 bg-foreground"
-                      : index < stepIndex
-                        ? "w-1.5 bg-foreground/50"
-                        : "w-1.5 bg-border"
-                  }`}
-                  aria-label={`${index + 1}. ${t(`desktop.onboarding.progress.${id}`)}`}
-                  aria-current={index === stepIndex ? "step" : undefined}
-                />
-              ))}
-            </nav>
-            <main className="flex min-h-0 flex-1 overflow-hidden">
-              {step === "language-permissions" && (
-                <div className="m-auto w-full max-w-xl px-6 py-8">
-                  <div className="text-center">
-                    <h2 className="text-2xl font-semibold leading-tight tracking-tight">
-                      {t("desktop.onboarding.personalize.title")}
-                    </h2>
-                    <p className="mt-2 text-sm leading-6 text-muted-foreground">
-                      {t("desktop.onboarding.personalize.description")}
-                    </p>
-                  </div>
-
-                  <div className="mx-auto mt-8 max-w-lg space-y-6">
-                    <section aria-labelledby="onboarding-interface-language">
-                      <h3
-                        id="onboarding-interface-language"
-                        className="mb-3 text-sm font-medium text-foreground"
-                      >
-                        {t("desktop.onboarding.personalize.language")}
-                      </h3>
-                      <div className="grid grid-cols-3 gap-2" role="radiogroup">
-                        {ONBOARDING_UI_LANGUAGES.map((language) => {
-                          const selected = uiLanguage === language.value;
-                          return (
-                            <button
-                              key={language.value}
-                              type="button"
-                              role="radio"
-                              aria-checked={selected}
-                              onClick={() => setUiLanguage(language.value)}
-                              className={`flex min-h-16 flex-col items-center justify-center gap-1 rounded-lg border px-2 py-2 text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${
-                                selected
-                                  ? "border-foreground bg-foreground text-background"
-                                  : "border-border bg-background hover:bg-accent"
-                              }`}
-                            >
-                              <span aria-hidden="true" className="text-base leading-none">
-                                {language.flag}
-                              </span>
-                              <span>{language.label}</span>
-                            </button>
-                          );
-                        })}
-                      </div>
-                    </section>
-
-                    <section aria-labelledby="onboarding-appearance">
-                      <h3
-                        id="onboarding-appearance"
-                        className="mb-3 text-sm font-medium text-foreground"
-                      >
-                        {t("desktop.onboarding.personalize.appearance")}
-                      </h3>
-                      <div className="grid grid-cols-3 gap-2" role="radiogroup">
-                        {ONBOARDING_THEMES.map((option) => {
-                          const Icon = option.icon;
-                          const selected = theme === option.value;
-                          return (
-                            <button
-                              key={option.value}
-                              type="button"
-                              role="radio"
-                              aria-checked={selected}
-                              onClick={() => setTheme(option.value)}
-                              className={`flex min-h-14 items-center justify-center gap-2 rounded-lg border px-2 py-2 text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${
-                                selected
-                                  ? "border-foreground bg-foreground text-background"
-                                  : "border-border bg-background hover:bg-accent"
-                              }`}
-                            >
-                              <Icon className="h-4 w-4" strokeWidth={1.7} />
-                              <span>{t(option.labelKey)}</span>
-                            </button>
-                          );
-                        })}
-                      </div>
-                    </section>
-                  </div>
-                </div>
-              )}
-
-              {step === "hotkey" && (
-                <div className="m-auto flex w-full max-w-lg flex-col items-center px-6 py-3 text-center">
-                  <div>
-                    <h2 className="text-2xl font-semibold leading-tight tracking-tight">
-                      {t("desktop.onboarding.permissions.title")}
-                    </h2>
-                    <p className="mt-2 text-sm leading-6 text-muted-foreground">
-                      {t("desktop.onboarding.permissions.description")}
-                    </p>
-                  </div>
-
-                  <section
-                    className="mt-5 w-full overflow-hidden rounded-lg border border-border"
-                    aria-label={t("desktop.onboarding.permissions.title")}
-                  >
-                    {[
-                      {
-                        id: "microphone",
-                        icon: Mic,
-                        title: t("desktop.onboarding.permissions.microphone"),
-                        description: t("desktop.onboarding.permissions.microphoneDescription"),
-                        granted: permissions.micPermissionGranted,
-                        request: permissions.requestMicPermission,
-                      },
-                      ...(needsTextInsertionPermission
-                        ? [
-                            {
-                              id: "text-insertion",
-                              icon: Shield,
-                              title: t("desktop.onboarding.permissions.textInsertion"),
-                              description: t(
-                                "desktop.onboarding.permissions.textInsertionDescription"
-                              ),
-                              granted: permissions.accessibilityPermissionGranted,
-                              request: permissions.requestAccessibilityPermission,
-                            },
-                          ]
-                        : []),
-                      ...(shouldShowSystemAudioPermission
-                        ? [
-                            {
-                              id: "system-audio",
-                              icon: Monitor,
-                              title: t("onboarding.permissions.systemAudioTitle"),
-                              description: t("onboarding.permissions.systemAudioDescription"),
-                              granted: systemAudio.granted,
-                              request: systemAudio.request,
-                              pending: systemAudio.isChecking,
-                            },
-                          ]
-                        : []),
-                    ].map((permission, index) => {
-                      const Icon = permission.icon;
-                      const isPending = permission.pending ?? false;
-                      const isSystemAudio = permission.id === "system-audio";
-                      const isEnabled = permission.granted &&
-                        (!isSystemAudio || systemAudioCaptureEnabled);
-                      const canToggle = isSystemAudio && permission.granted && !isPending;
-                      return (
-                        <div
-                          key={permission.id}
-                          className={`flex min-h-14 items-center gap-3 px-4 py-2.5 text-left ${
-                            index > 0 ? "border-t border-border" : ""
-                          } ${isEnabled ? "bg-foreground/[0.03]" : "bg-background"}`}
-                        >
-                          <span
-                            className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-md border ${
-                              isEnabled
-                                ? "border-foreground bg-foreground text-background"
-                                : "border-border bg-muted/50 text-muted-foreground"
-                            }`}
-                          >
-                            {isEnabled ? (
-                              <Check className="h-4 w-4" strokeWidth={2.5} />
-                            ) : (
-                              <Icon className="h-4 w-4" strokeWidth={1.7} />
-                            )}
-                          </span>
-                          <span className="min-w-0 flex-1">
-                            <span className="block text-sm font-medium">{permission.title}</span>
-                            <span className="mt-0.5 block text-xs leading-4 text-muted-foreground">
-                              {permission.description}
-                            </span>
-                          </span>
-                          <button
-                            type="button"
-                            role="switch"
-                            aria-checked={isEnabled}
-                            aria-label={`${permission.title}: ${
-                              isEnabled
-                                ? t("desktop.onboarding.permissions.granted")
-                                : t("desktop.onboarding.permissions.allow")
-                            }`}
-                            aria-busy={isPending || undefined}
-                            disabled={isPending || (permission.granted && !isSystemAudio)}
-                            onClick={
-                              isPending
-                                ? undefined
-                                : canToggle
-                                  ? () => setSystemAudioCaptureEnabled(!systemAudioCaptureEnabled)
-                                  : permission.granted
-                                    ? undefined
-                                    : permission.request
-                            }
-                            className={`relative ml-auto h-6 w-10 shrink-0 rounded-full border transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-default ${
-                              isEnabled
-                                ? "border-foreground bg-foreground"
-                                : "border-border bg-muted/50 hover:border-foreground/40"
-                            }`}
-                          >
-                            <span
-                              className={`absolute top-0.5 h-4 w-4 rounded-full transition-[left] duration-150 ${
-                                isEnabled
-                                  ? "left-5 bg-background"
-                                  : "left-0.5 bg-muted-foreground/70"
-                              }`}
-                            />
-                          </button>
-                        </div>
-                      );
-                    })}
-                  </section>
-
-                  {!setupPermissionsGranted && (
-                    <p className="mt-2 text-xs leading-4 text-muted-foreground" role="status">
-                      {showPermissionNotice
-                        ? t("desktop.onboarding.permissions.permissionNotice")
-                        : t("desktop.onboarding.permissions.required")}
-                    </p>
-                  )}
-
-                  <section className="mt-4 w-full" aria-labelledby="onboarding-shortcut">
-                    <h3 id="onboarding-shortcut" className="mb-2 text-sm font-medium">
-                      {t("desktop.onboarding.permissions.shortcut")}
-                    </h3>
-                    <HotkeyInput
-                      variant="onboarding"
-                      value={hotkey}
-                      disabled={isRegistering}
-                      onChange={async (value) => {
-                        if (await registerHotkey(value)) {
-                          setHotkey(value);
-                          setDictationKey(value);
-                          localStorage.setItem("hotkey", value);
-                        }
-                      }}
-                    />
-                  </section>
-                </div>
-              )}
-            </main>
-            <footer className="flex h-14 shrink-0 items-end justify-center">
-              <div className="flex items-center justify-center gap-3">
-                {stepIndex > 0 && (
-                  <Button
-                    variant="ghost"
-                    size="lg"
-                    className={ONBOARDING_NAV_BUTTON_CLASS}
-                    onClick={() => go(ONBOARDING_STEPS[Math.max(0, stepIndex - 1)])}
-                  >
-                    {t("common.back")}
-                  </Button>
-                )}
-                <Button
+                <OnbButton
                   size="lg"
                   className={ONBOARDING_NAV_BUTTON_CLASS}
                   disabled={!canContinue}
-                  onClick={() =>
-                    go(ONBOARDING_STEPS[Math.min(ONBOARDING_STEPS.length - 1, stepIndex + 1)])
-                  }
+                  onClick={primaryAction}
+                  data-testid="onboarding-primary"
                 >
-                  {t("common.next")}
-                </Button>
+                  {primaryLabel}
+                </OnbButton>
               </div>
-            </footer>
-          </div>
-        )}
+            )}
+          </footer>
+        </div>
       </section>
     </div>
   );

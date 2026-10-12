@@ -91,6 +91,19 @@ const MAX_STORED_AUDIO_BYTES = 128 * 1024 * 1024;
 const MAX_MEETING_CHUNK_BYTES = 4 * 1024 * 1024;
 const MAX_UPLOAD_AUDIO_BYTES = 200 * 1024 * 1024;
 
+/** Walks up from the executable to the enclosing .app bundle (dev: Electron.app). */
+function resolveAppBundlePath() {
+  const exePath = app.getPath("exe");
+  let current = exePath;
+  for (let depth = 0; depth < 6; depth += 1) {
+    const parent = path.dirname(current);
+    if (parent === current) break;
+    current = parent;
+    if (current.endsWith(".app")) return current;
+  }
+  return exePath;
+}
+
 function toBoundedAudioBuffer(value, maximumBytes, label = "Audio") {
   let buffer;
   if (Buffer.isBuffer(value)) {
@@ -1761,6 +1774,32 @@ class IPCHandlers {
     this._handle("prompt-accessibility-permission", async () => {
       if (process.platform !== "darwin") return true;
       return systemPreferences.isTrustedAccessibilityClient(true);
+    });
+
+    this._handle("show-accessibility-drop", async () => {
+      await this.windowManager.showAccessibilityDrop?.();
+      return { success: true };
+    });
+
+    this._handle("hide-accessibility-drop", () => {
+      this.windowManager.hideAccessibilityDrop?.();
+      return { success: true };
+    });
+
+    // Native drag of the app bundle so System Settings can add it to the
+    // Accessibility list. Must start synchronously from the renderer's dragstart.
+    this._on("accessibility-drop-start-drag", (event) => {
+      if (process.platform !== "darwin") return;
+      const bundlePath = resolveAppBundlePath();
+      app
+        .getFileIcon(bundlePath, { size: "normal" })
+        .then((icon) => {
+          if (event.sender.isDestroyed()) return;
+          event.sender.startDrag({ file: bundlePath, icon });
+        })
+        .catch((error) => {
+          debugLogger.warn("Accessibility drop drag failed", { error: error?.message });
+        });
     });
 
     this._handle("read-clipboard", async (event) => {

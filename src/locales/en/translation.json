@@ -3179,7 +3179,9 @@
       "refreshHint": "Refresh after changing your plan on VoiceLab.",
       "refreshing": "Refreshing…",
       "refresh": "Refresh",
-      "intervals": { "month": "month" }
+      "intervals": {
+        "month": "month"
+      }
     },
     "creditShortage": {
       "title": "More AI Credits needed",
@@ -3211,88 +3213,292 @@
       }
     },
     "onboarding": {
-      "progress": {
-        "welcome": "Welcome",
-        "mode": "How it works",
-        "language-permissions": "Personalize",
-        "hotkey": "Shortcut",
-        "ready": "Ready"
+      "sections": {
+        "getStarted": "Get started",
+        "permissions": "Permissions",
+        "setUp": "Set up",
+        "learn": "Learn",
+        "personalize": "Personalize"
+      },
+      "nav": {
+        "progress": "Onboarding progress",
+        "stepCount": "Step {{current}} of {{total}}",
+        "startSetup": "Start setup",
+        "finish": "Finish",
+        "uiLanguage": "Interface language"
       },
       "welcome": {
-        "title": "VoiceLab",
-        "description": "Turn spoken words into text wherever you work. When you are ready, sign in to set up dictation.",
-        "preferences": "VoiceLab starts with your system appearance and language."
-      },
-      "howItWorks": {
-        "title": "How it works",
-        "description": "Speak naturally. VoiceLab turns your words into text in the app you’re using.",
+        "titlePrefix": "VoiceLab is voice-to-text that works in",
+        "titleAccent": "every app",
+        "titleSuffix": ".",
+        "description": "Speak naturally. VoiceLab turns your words into clean text right where your cursor is: messages, emails, documents and more.",
         "speak": "Speak",
         "voicelab": "VoiceLab",
         "text": "Text"
       },
-      "personalize": {
-        "title": "Personalize",
-        "description": "Choose the language and appearance you prefer.",
-        "language": "Language",
+      "signin": {
+        "title": "Connect your VoiceLab account",
+        "description": "Your account unlocks cloud transcription and keeps your history in one place.",
+        "connected": "You're in!",
+        "connectedDescription": "Your VoiceLab account is ready. Let's set up your computer.",
+        "continuing": "Continuing…",
+        "benefitCloud": "Cloud transcription in Uzbek, Russian and English",
+        "benefitHistory": "Your dictation history stays with your account",
+        "benefitSecurity": "Your password never enters the desktop app"
+      },
+      "aboutYou": {
+        "title": "Tell us about yourself",
+        "description": "What do you do for work? This helps VoiceLab understand your vocabulary.",
+        "roles": {
+          "developer": "Developer",
+          "founder": "Founder / CEO",
+          "product": "Product",
+          "marketing": "Marketing",
+          "sales": "Sales",
+          "operations": "Operations",
+          "student": "Student",
+          "educator": "Educator",
+          "writer": "Writer",
+          "creator": "Creator",
+          "consultant": "Consultant",
+          "legal": "Legal",
+          "healthcare": "Healthcare",
+          "support": "Customer support",
+          "other": "Other"
+        }
+      },
+      "typingPlaces": {
+        "title": "Where do you spend time typing?",
+        "description": "This helps us personalize VoiceLab where you work. Select all that apply.",
+        "options": {
+          "messages": "Sending messages",
+          "emails": "Drafting emails",
+          "documents": "Writing documents",
+          "notes": "Taking notes",
+          "ai": "Chatting with AI",
+          "coding": "Coding with AI",
+          "posts": "Posts and comments",
+          "other": "Something else"
+        }
+      },
+      "privacy": {
+        "title": "You control your data",
+        "description": "Decide what VoiceLab keeps on this computer and what it shares.",
+        "historyTitle": "Keep my dictation history on this device",
+        "historyDescription": "Lets you search and reuse past dictations in VoiceLab.",
+        "usageTitle": "Share anonymous usage data",
+        "usageDescription": "Helps us find bugs and improve VoiceLab. Never includes your audio or text.",
+        "note": "Audio is sent to VoiceLab Cloud only to transcribe it. You can change these anytime in Settings."
+      },
+      "permissions": {
+        "headerInProgress": "Give VoiceLab permissions on your computer",
+        "headerComplete": "Thanks for trusting us. We value your privacy.",
+        "description": "VoiceLab only uses these while you are actively dictating.",
+        "microphoneTitle": "Allow VoiceLab to use your microphone",
+        "microphoneDescription": "VoiceLab listens only while you use your shortcut.",
+        "microphoneHelp": "VoiceLab shows an indicator whenever the microphone is active.",
+        "microphoneSuccess": "VoiceLab can now use your microphone",
+        "accessibilityTitle": "Allow VoiceLab to insert spoken words",
+        "accessibilityDescription": "This lets VoiceLab type the result into the textbox you are using.",
+        "accessibilityHelp": "After clicking Allow, turn on VoiceLab in the Accessibility list and come back.",
+        "accessibilitySuccess": "VoiceLab can now type anywhere",
+        "allow": "Allow",
+        "notice": "You can also change these later in System Settings."
+      },
+      "micTest": {
+        "title": "Test your microphone",
+        "subtitle": "We recommend built-in or wired microphones. Bluetooth devices are less reliable.",
+        "instruction": "Do you see bars moving while you speak?",
+        "live": "Live",
+        "heard": "We can hear you!",
+        "speakToContinue": "Speak to continue",
+        "changeMic": "Change microphone",
+        "defaultMic": "System default microphone",
+        "refresh": "Refresh devices",
+        "quickTipLabel": "Quick tip",
+        "quickTip": "A wired headset or desk microphone also works well for quiet dictation.",
+        "errors": {
+          "notAllowedTitle": "Microphone access required",
+          "notAllowedBody": "VoiceLab needs your microphone to work. Allow it in System Settings and try again.",
+          "notFoundTitle": "No microphone detected",
+          "notFoundBody": "Connect a microphone or check that one is enabled.",
+          "inUseTitle": "Microphone is in use",
+          "inUseBody": "Another app may be holding your mic. Close Zoom, Teams, Meet or FaceTime and try again.",
+          "unknownTitle": "Microphone error",
+          "unknownBody": "VoiceLab couldn't start your microphone. Try a different device."
+        }
+      },
+      "shortcut": {
+        "title": "Test your dictation shortcut",
+        "subtitleHold": "Hold ⟪KEY⟫ while you speak. VoiceLab turns your voice into text.",
+        "subtitleTap": "Press ⟪KEY⟫ to start, speak, then press it again to finish.",
+        "instruction": "Does the key light up while pressing it?",
+        "detected": "It works!",
+        "pressHint": "Press the key on your keyboard!",
+        "works": "Shortcut detected",
+        "change": "Edit shortcut",
+        "no": "No",
+        "yes": "Yes",
+        "capture": "Press the key or combination you want to use for dictation.",
+        "recommend": "We recommend the fn key at the bottom left of the keyboard: it is easy to reach and never conflicts with typing."
+      },
+      "dictationLanguage": {
+        "title": "Which language do you speak?",
+        "description": "VoiceLab transcribes Uzbek, Russian and English.",
+        "auto": "Auto-detect",
+        "autoDescription": "Let VoiceLab recognise the language",
+        "changeLater": "You can change this anytime in Settings."
+      },
+      "tryItIntro": {
+        "titleHold": "VoiceLab starts listening when you hold ⟪KEY⟫",
+        "titleTap": "VoiceLab starts listening when you press ⟪KEY⟫",
+        "subtitleHold": "It'll paste what you said when you let go.",
+        "subtitleTap": "It'll paste what you said when you press it again.",
+        "cta": "Give it a try!"
+      },
+      "tryIt": {
+        "subtitleHold": "Hold ⟪KEY⟫, speak, and let go to insert the text.",
+        "subtitleTap": "Press ⟪KEY⟫, speak, then press it again to insert the text.",
+        "placeholderHold": "Hold ⟪KEY⟫, say something, then release.",
+        "placeholderTap": "Press ⟪KEY⟫, say something, then press it again.",
+        "greetingFallback": "there",
+        "clickTextbox": "Click into the text field first!",
+        "wellDone": "Well done!",
+        "trySaying": "Try saying:",
+        "message": {
+          "titlePrefix": "",
+          "titleAccent": "Dictate",
+          "titleSuffix": " a message with VoiceLab",
+          "windowTitle": "Messages",
+          "greeting": "Hey {{firstName}}, is VoiceLab working for you?",
+          "sample": "Hi! Yes, VoiceLab works great. Let's meet tomorrow at ten.",
+          "afterwards": "VoiceLab removed the filler words and added punctuation for you."
+        },
+        "email": {
+          "titlePrefix": "Try ",
+          "titleAccent": "smart formatting",
+          "titleSuffix": " in email",
+          "windowTitle": "New message",
+          "toLabel": "To:",
+          "toValue": "Greg",
+          "subjectLabel": "Subject:",
+          "subjectValue": "Meeting plan",
+          "sample": "Umm hi Greg. Let's connect soon. Are you available on Friday at 3, no actually 4? Best, Alex",
+          "afterwards": "Self-corrections like “no actually 4” are resolved automatically."
+        },
+        "list": {
+          "titlePrefix": "Try dictating ",
+          "titleAccent": "a list",
+          "titleSuffix": "",
+          "windowTitle": "Notes",
+          "pageTitle": "Shopping list",
+          "sample": "I want to pick up a few things from the store: bread, potato chips, ice cream.",
+          "afterwards": "VoiceLab formats lists and steps depending on the context."
+        }
+      },
+      "timeSavings": {
+        "title": "Nice job!",
+        "spoke": "You just spoke {{count}} words per minute.",
+        "generic": "Speaking is far faster than typing, and VoiceLab keeps up.",
+        "faster": "{{multiplier}}× faster",
+        "fasterSubtitle": "than the average typing speed",
+        "yourVoice": "Your voice",
+        "avgTyping": "Avg typing speed",
+        "wpm": "{{count}} words/min",
+        "sliderLabel": "Typing time per day",
+        "hours": "{{count}} h",
+        "savePrefix": "With VoiceLab you could save",
+        "saveHours": "{{count}} hours",
+        "saveSuffix": "a week!"
+      },
+      "writingNeeds": {
+        "title": "Let's talk about your relationship with typing.",
+        "description": "Learning how you type helps us find the ways VoiceLab can be helpful to you.",
+        "options": {
+          "captureIdeas": "I need to capture ideas quickly",
+          "draftDocuments": "I need to draft documents with less effort",
+          "manyEmails": "I have to write a lot of emails",
+          "manyMessages": "I have to write a lot of messages",
+          "typingTiring": "I think typing is tiring or uncomfortable",
+          "handsFree": "I need to work hands-free or on the go",
+          "aiPrompts": "I want to write more detailed AI prompts",
+          "codeWithAi": "I want to code with AI more easily"
+        }
+      },
+      "personalizeIntro": {
+        "titlePrefix": "Next, let's personalize",
+        "titleAccent": "your",
+        "titleSuffix": "VoiceLab",
+        "description": "Choose how VoiceLab formats your dictations in different kinds of writing.",
         "appearance": "Appearance",
         "light": "Light",
         "dark": "Dark",
-        "system": "System"
+        "system": "System",
+        "later": "Set up later"
       },
-      "permissions": {
-        "title": "Set up your voice",
-        "description": "Allow access and choose the key that starts dictation.",
-        "microphone": "Microphone",
-        "microphoneDescription": "Needed to hear your dictation.",
-        "textInsertion": "Text insertion",
-        "textInsertionDescription": "Needed to type the result in other apps.",
-        "allow": "Allow",
-        "granted": "Allowed",
-        "shortcut": "Shortcut",
-        "try": "Try it",
-        "tryPlaceholder": "Change the shortcut, then press or hold it and speak here.",
-        "tryHint": "Like the shortcut? Continue when you’re ready.",
-        "holdToDictate": "Hold {{shortcut}} to dictate.",
-        "pressShortcut": "Press the shortcut once to check it.",
-        "shortcutDetected": "Shortcut detected. You’re all set.",
-        "required": "Allow the required access to continue.",
-        "permissionNotice": "You can allow this later in Settings."
+      "style": {
+        "titlePrefix": "How do you write your",
+        "titleSuffix": "?",
+        "legend": "Highlighted parts show what changes: wording and capitalization are shaded, punctuation is blue.",
+        "names": {
+          "casual": "Casual",
+          "formal": "Formal",
+          "excited": "Excited!"
+        },
+        "hints": {
+          "casual": "Light punctuation, relaxed wording",
+          "formal": "Full punctuation, polished wording",
+          "excited": "More exclamation marks!"
+        },
+        "personal": {
+          "subject": "personal messages",
+          "description": "We'll apply this style to personal messages.",
+          "samples": {
+            "casual": "[hey] are you free for lunch tomorrow? [let's] do 12 if that works for you",
+            "formal": "[Hey]{,} are you free for lunch tomorrow? [Let's] do 12 if that works for you{.}"
+          }
+        },
+        "work": {
+          "subject": "work messages",
+          "description": "We'll apply this style to work messages.",
+          "samples": {
+            "casual": "[hey] if you're free let's chat about the great results",
+            "formal": "[Hey]{,} if you're free{,} let's chat about the great results{.}",
+            "excited": "[Hey]{,} if you're free{,} let's chat about the great results{!}"
+          }
+        },
+        "email": {
+          "subject": "emails",
+          "description": "We'll apply this style to emails.",
+          "samples": {
+            "casual": "[Hi] Alex{,} it was great talking with you today. [Looking] forward to our next chat{.}\n\nBest,\nMary",
+            "formal": "[Hi] Alex{,}\n\n[It] was great talking with you today. [Looking] forward to our next chat{.}\n\nBest,\nMary",
+            "excited": "[Hi] Alex{,}\n\n[It] was great talking with you today. [Looking] forward to our next chat{!}\n\nBest,\nMary"
+          }
+        },
+        "other": {
+          "subject": "other apps",
+          "description": "We'll apply this style to all other apps.",
+          "samples": {
+            "casual": "[So] far [I'm] enjoying the new workout routine.\n\n[I'm] excited for tomorrow's workout especially after a full night of rest.",
+            "formal": "[So] far{,} [I am] enjoying the new workout routine.\n\n[I am] excited for tomorrow's workout{,} especially after a full night of rest.",
+            "excited": "[So] far{,} [I'm] enjoying the new workout routine.\n\n[I'm] excited for tomorrow's workout{,} especially after a full night of rest{!}"
+          }
+        }
       },
-      "advanced": {
-        "title": "Advanced setup",
-        "description": "Use a local model or your own provider without a VoiceLab Cloud account.",
-        "localTitle": "Local model",
-        "localDescription": "Audio stays on this device and uses 0 AI Credits.",
-        "providerTitle": "My provider",
-        "providerDescription": "Connect your API key later in Advanced settings.",
-        "useCloud": "Continue with VoiceLab Cloud"
-      },
-      "mode": {
-        "localTitle": "Local mode",
-        "localDescription": "Whisper languages and automatic detection are available.",
-        "providerTitle": "Provider mode",
-        "providerDescription": "Connect your provider and API key after setup."
-      },
-      "language": {
-        "title": "Language and permissions",
-        "description": "Choose the language you usually dictate in.",
-        "loadingCapabilities": "Checking languages available for your account…",
-        "capabilitiesUnavailable": "Could not check cloud capabilities. You can still choose a language.",
-        "unsupported": "This language is not supported in the selected mode. Choose another language to continue.",
-        "microphoneRequired": "Microphone access is required to continue."
-      },
-      "hotkey": {
-        "title": "Shortcut and quick test",
-        "description": "Set a shortcut, speak, and check the result below.",
-        "placeholder": "Your result will appear here…"
+      "finish": {
+        "title": "Go try VoiceLab in another app",
+        "subtitle": "No additional setup needed.",
+        "step1": "Go to any app",
+        "step2": "Click on a textbox",
+        "step3Hold": "Hold ⟪KEY⟫ and speak",
+        "step3Tap": "Press ⟪KEY⟫ and speak",
+        "note": "VoiceLab stays in your menu bar. Open it anytime to see your history and settings.",
+        "signInTitle": "One last thing",
+        "signInRequired": "Sign in to your VoiceLab account to finish setup."
       },
       "ready": {
-        "title": "Ready",
-        "greeting": "Hello, {{name}}",
-        "account": "Your VoiceLab account is connected.",
-        "local": "Local transcription is selected.",
-        "provider": "Open Advanced settings to connect your provider.",
-        "start": "Start dictating"
+        "greeting": "Hello, {{name}}"
       }
     },
     "dictionary": {
@@ -3348,6 +3554,12 @@
       "protected": "Active and protected",
       "signedOut": "Not signed in",
       "signedOutDescription": "Sign in to use VoiceLab Cloud."
+    },
+    "accessibilityDrop": {
+      "instruction": "Drag {{app}} to the list above to allow {{permission}}",
+      "permission": "Accessibility",
+      "hide": "Hide",
+      "dragHint": "Drag me"
     }
   }
 }

@@ -4,6 +4,7 @@ import { useTranslation } from "react-i18next";
 import "./index.css";
 import { Minus, X } from "lucide-react";
 import { useToast } from "./components/ui/useToast";
+import { NoticeContent } from "./components/ui/Toast";
 import { useWindowDrag } from "./hooks/useWindowDrag";
 import { useAudioRecording } from "./hooks/useAudioRecording";
 import { useSettingsStore } from "./stores/settingsStore";
@@ -39,6 +40,11 @@ const AudioLevelBars = ({ audioLevel, active = false, processing = false }) => {
   );
 };
 
+// The island pill and the notice card it morphs into (px).
+const ISLAND_WIDTH = 74;
+const ISLAND_HEIGHT = 44;
+const NOTICE_WIDTH = 376;
+
 const FloatingVoiceIsland = ({ state, audioLevel }) => {
   const isRecording = state === "recording";
   const isProcessing = state === "processing";
@@ -59,7 +65,21 @@ export default function App() {
   const [isCommandMenuOpen, setIsCommandMenuOpen] = useState(false);
   const commandMenuRef = useRef(null);
   const buttonRef = useRef(null);
-  const { toast, dismiss, toastCount } = useToast();
+  const { toast, dismiss, toastCount, toasts, pauseTimer, resumeTimer } = useToast();
+  // The newest notice morphs the dictation control into a wide card.
+  const notice = toasts.length > 0 ? toasts[toasts.length - 1] : null;
+  const noticeExpanded = Boolean(notice) && !notice.isExiting;
+  const noticeRef = useRef(null);
+  const [noticeHeight, setNoticeHeight] = useState(0);
+  useLayoutEffect(() => {
+    if (!noticeRef.current) return undefined;
+    const element = noticeRef.current;
+    const measure = () => setNoticeHeight(element.offsetHeight);
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, [notice?.id]);
   const { t } = useTranslation();
   const { isDragging, handleMouseDown, handleMouseUp } = useWindowDrag();
 
@@ -294,7 +314,7 @@ export default function App() {
   const micState = getMicState();
 
   const micProps = {
-    className: `relative flex h-11 w-28 items-center justify-center overflow-visible border-0 bg-transparent p-0 ${
+    className: `voice-morph__button relative flex h-11 w-[74px] items-center justify-center overflow-visible border-0 bg-transparent p-0 ${
       micState === "processing" || micState === "unavailable"
         ? "cursor-not-allowed"
         : "cursor-pointer"
@@ -354,7 +374,31 @@ export default function App() {
               />
             </button>
           )}
-          <button
+          <div
+            className="voice-morph"
+            data-expanded={noticeExpanded ? "true" : "false"}
+            style={
+              noticeExpanded
+                ? { width: NOTICE_WIDTH, height: Math.max(noticeHeight, ISLAND_HEIGHT) }
+                : { width: ISLAND_WIDTH, height: ISLAND_HEIGHT }
+            }
+          >
+            {notice && (
+              <div
+                ref={noticeRef}
+                className="voice-morph__notice"
+                style={{ width: NOTICE_WIDTH }}
+                aria-hidden={!noticeExpanded}
+              >
+                <NoticeContent
+                  {...notice}
+                  onClose={() => dismiss(notice.id)}
+                  onPauseTimer={() => pauseTimer(notice.id)}
+                  onResumeTimer={(remaining) => resumeTimer(notice.id, remaining)}
+                />
+              </div>
+            )}
+            <button
               ref={buttonRef}
               aria-label={micProps.tooltip}
               aria-pressed={micState === "recording"}
@@ -416,7 +460,8 @@ export default function App() {
             >
               <FloatingVoiceIsland state={micState} audioLevel={audioLevel} />
               <span className="sr-only">{micProps.tooltip}</span>
-          </button>
+            </button>
+          </div>
           {isCommandMenuOpen && (
             <div
               ref={commandMenuRef}

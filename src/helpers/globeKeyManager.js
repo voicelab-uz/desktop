@@ -27,6 +27,18 @@ class GlobeKeyManager extends EventEmitter {
     this._restartCount = 0;
     this._restartResetTimer = null;
     this.suppressedMouseButtons = [];
+    this.swallowFn = false;
+  }
+
+  /** Consume bare fn presses so macOS does not run its own fn action. */
+  setSwallowFn(enabled) {
+    const next = Boolean(enabled);
+    if (next === this.swallowFn) return;
+    this.swallowFn = next;
+    if (this.process) {
+      this.stop();
+      this.start();
+    }
   }
 
   setSuppressedMouseButtons(buttons = []) {
@@ -94,11 +106,16 @@ class GlobeKeyManager extends EventEmitter {
     }
 
     this.hasReportedError = false;
-    const child = spawn(listenerPath, this.suppressedMouseButtons);
+    const listenerArgs = [
+      ...this.suppressedMouseButtons,
+      ...(this.swallowFn ? ["--swallow-fn"] : []),
+    ];
+    const child = spawn(listenerPath, listenerArgs);
     this.process = child;
     debugLogger.info("[GlobeKeyManager] Process spawned", {
       pid: child.pid,
       suppressedMouseButtons: this.suppressedMouseButtons,
+      swallowFn: this.swallowFn,
     });
 
     // After sustained uptime, reset the restart counter so future sleep/wake

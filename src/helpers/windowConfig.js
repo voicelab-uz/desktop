@@ -122,6 +122,31 @@ const NOTIFICATION_WINDOW_CONFIG = {
   type: FLOATING_OVERLAY_TYPE,
 };
 
+// Floating helper shown while System Settings is open so the person can drag the
+// app bundle into the Accessibility list when macOS does not list it by itself.
+const ACCESSIBILITY_DROP_CONFIG = {
+  width: 560,
+  height: 96,
+  frame: false,
+  transparent: true,
+  alwaysOnTop: true,
+  skipTaskbar: true,
+  resizable: false,
+  movable: true,
+  focusable: true,
+  hasShadow: false,
+  show: false,
+  webPreferences: {
+    preload: path.join(__dirname, "..", "..", "preloads", "accessibility-drop.js"),
+    nodeIntegration: false,
+    contextIsolation: true,
+    sandbox: true,
+    webSecurity: true,
+  },
+  visibleOnAllWorkspaces: process.platform !== "win32",
+  type: FLOATING_OVERLAY_TYPE,
+};
+
 const TRANSCRIPTION_PREVIEW_SIZE_LIMITS = {
   minWidth: 400,
   defaultWidth: 460,
@@ -182,6 +207,15 @@ class WindowPositionUtil {
     const workArea = display.workArea || display.bounds;
     const x = Math.max(0, workArea.x + workArea.width - width - MARGIN);
     const y = Math.max(0, workArea.y + MARGIN);
+    return { x, y, width, height };
+  }
+
+  static getAccessibilityDropPosition(display) {
+    const { width, height } = ACCESSIBILITY_DROP_CONFIG;
+    const MARGIN = 28;
+    const workArea = display.workArea || display.bounds;
+    const x = Math.round(workArea.x + (workArea.width - width) / 2);
+    const y = Math.max(0, workArea.y + workArea.height - height - MARGIN);
     return { x, y, width, height };
   }
 
@@ -266,6 +300,7 @@ module.exports = {
   CONTROL_PANEL_CONFIG,
   AGENT_OVERLAY_CONFIG,
   NOTIFICATION_WINDOW_CONFIG,
+  ACCESSIBILITY_DROP_CONFIG,
   TRANSCRIPTION_PREVIEW_CONFIG,
   TRANSCRIPTION_PREVIEW_SIZE_LIMITS,
   WINDOW_SIZES,

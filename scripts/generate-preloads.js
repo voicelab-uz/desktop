@@ -19,6 +19,7 @@ const windowSpecific = new Set([
   "onPreviewResult",
   "onPreviewHide",
   "resizeTranscriptionPreviewWindow",
+  "accessibilityDropStartDrag",
 ]);
 
 const controlOnly = new Set([
@@ -174,6 +175,12 @@ const preview = new Set([
   "hideDictationPreview",
 ]);
 
+const accessibilityDrop = new Set([
+  "getPlatform",
+  "accessibilityDropStartDrag",
+  "hideAccessibilityDrop",
+]);
+
 const capabilities = {
   "control-panel": allNames.filter((name) => !windowSpecific.has(name)),
   overlay: allNames.filter(
@@ -185,6 +192,7 @@ const capabilities = {
   agent: [...agent],
   notification: [...notification],
   preview: [...preview],
+  "accessibility-drop": [...accessibilityDrop],
 };
 
 fs.mkdirSync(outputDir, { recursive: true });

@@ -12,6 +12,7 @@ import { useTheme } from "./hooks/useTheme";
 import ConnectionStatus from "./components/ConnectionStatus";
 import WelcomeGreeting from "./components/WelcomeGreeting.tsx";
 import UpdateAvailableBanner from "./components/UpdateAvailableBanner.tsx";
+import AccessibilityDropPanel from "./components/AccessibilityDropPanel.tsx";
 import { hasOnboardingProgress } from "./constants/onboarding";
 
 const ControlPanel = React.lazy(() => import("./components/ControlPanel.tsx"));
@@ -23,6 +24,10 @@ export default function AppRouter() {
 
   if (params.includes("meeting-notification=true")) {
     return <MeetingNotificationOverlay />;
+  }
+
+  if (params.includes("accessibility-drop=true")) {
+    return <AccessibilityDropPanel />;
   }
 
   if (params.includes("transcription-preview=true")) {

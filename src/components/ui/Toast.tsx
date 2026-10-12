@@ -1,17 +1,13 @@
 import * as React from "react";
-import { X, Copy, Check } from "lucide-react";
+import { Check, CircleCheck, Copy, Info, TriangleAlert, X } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { cn } from "../lib/utils";
-import { ToastContext, type ToastProps } from "./useToast";
+import { ToastContext, type ToastProps, type ToastRecord } from "./useToast";
 import { isDictationPanelWindow } from "../../utils/windowContext";
 import { playErrorCue, playNotificationCue } from "../../utils/dictationCues";
 import { getSettings } from "../../stores/settingsStore";
 
-interface ToastState extends ToastProps {
-  id: string;
-  isExiting?: boolean;
-  createdAt: number;
-}
+type ToastState = ToastRecord;
 
 export const ToastProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [toasts, setToasts] = React.useState<ToastState[]>([]);
@@ -27,9 +23,10 @@ export const ToastProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 
   const startExitAnimation = React.useCallback((id: string) => {
     setToasts((prev) => prev.map((t) => (t.id === id ? { ...t, isExiting: true } : t)));
+    // Long enough for the dictation island to shrink back before the toast leaves.
     setTimeout(() => {
       setToasts((prev) => prev.filter((t) => t.id !== id));
-    }, 200);
+    }, 360);
   }, []);
 
   const toast = React.useCallback(
@@ -40,12 +37,13 @@ export const ToastProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       // The global preference intentionally keeps errors visible, but hides
       // ordinary success/info toasts and their notification sound.
       if (!isError && !getSettings().notificationsEnabled) return id;
-      const newToast: ToastState = { ...props, id, createdAt: Date.now() };
+      // Store the resolved duration so the close-button ring and the timer agree.
+      const duration = props.duration ?? (props.variant === "destructive" ? 6000 : 3500);
+      const newToast: ToastState = { ...props, duration, id, createdAt: Date.now() };
 
       void (isError ? playErrorCue() : playNotificationCue());
       setToasts((prev) => [...prev, newToast]);
 
-      const duration = props.duration ?? (props.variant === "destructive" ? 6000 : 3500);
       if (duration > 0) {
         const timer = setTimeout(() => {
           startExitAnimation(id);
@@ -103,7 +101,9 @@ export const ToastProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   }, []);
 
   return (
-    <ToastContext.Provider value={{ toast, dismiss, toastCount: toasts.length }}>
+    <ToastContext.Provider
+      value={{ toast, dismiss, toastCount: toasts.length, toasts, pauseTimer, resumeTimer }}
+    >
       {children}
       <ToastViewport
         toasts={toasts}
@@ -123,15 +123,11 @@ const ToastViewport: React.FC<{
 }> = ({ toasts, onDismiss, onPauseTimer, onResumeTimer }) => {
   const isDictationPanel = React.useMemo(isDictationPanelWindow, []);
 
-  if (toasts.length === 0) return null;
+  // The dictation overlay morphs its own control into the notice instead.
+  if (isDictationPanel || toasts.length === 0) return null;
 
   return (
-    <div
-      className={cn(
-        "fixed z-[100] flex flex-col gap-1.5 pointer-events-none",
-        isDictationPanel ? "bottom-20 right-6" : "bottom-5 right-5"
-      )}
-    >
+    <div className="fixed z-[100] flex flex-col gap-2 pointer-events-none bottom-5 right-5">
       {toasts.map((toast) => (
         <Toast
           key={toast.id}
@@ -149,24 +145,193 @@ const variantConfig = {
   default: {
     accentClass: "bg-white/20",
     progressClass: "bg-white/15",
+    iconClass: "text-white/70",
+    Icon: Info,
   },
   destructive: {
     accentClass: "bg-red-400",
     progressClass: "bg-red-400/30",
+    iconClass: "text-amber-300",
+    Icon: TriangleAlert,
   },
   success: {
     accentClass: "bg-emerald-400",
     progressClass: "bg-emerald-400/30",
+    iconClass: "text-emerald-300",
+    Icon: CircleCheck,
   },
 };
 
-const Toast: React.FC<
-  ToastState & {
-    onClose?: () => void;
-    onPauseTimer: () => void;
-    onResumeTimer: (remaining: number) => void;
-  }
-> = ({
+type ToastComponentProps = ToastState & {
+  onClose?: () => void;
+  onPauseTimer: () => void;
+  onResumeTimer: (remaining: number) => void;
+};
+
+function useHoverPause({
+  createdAt,
+  duration,
+  onPauseTimer,
+  onResumeTimer,
+}: Pick<ToastComponentProps, "createdAt" | "duration" | "onPauseTimer" | "onResumeTimer">) {
+  const pausedAtRef = React.useRef<number | null>(null);
+  const handleMouseEnter = () => {
+    pausedAtRef.current = Date.now();
+    onPauseTimer();
+  };
+  const handleMouseLeave = () => {
+    if (pausedAtRef.current && duration && duration > 0) {
+      const elapsed = pausedAtRef.current - createdAt;
+      const remaining = Math.max(duration - elapsed, 500);
+      onResumeTimer(remaining);
+    }
+    pausedAtRef.current = null;
+  };
+  return { handleMouseEnter, handleMouseLeave };
+}
+
+const RING_RADIUS = 15;
+const RING_CIRCUMFERENCE = 2 * Math.PI * RING_RADIUS;
+
+export type NoticeContentProps = ToastComponentProps;
+
+/**
+ * Body of a notice: icon, bold headline, plain-language explanation, optional
+ * technical details and action. The close button carries a thin ring that
+ * drains as the notice auto-dismisses. The dictation island morphs around it.
+ */
+export const NoticeContent: React.FC<NoticeContentProps> = ({
+  title,
+  description,
+  meta,
+  icon,
+  action,
+  variant = "default",
+  duration = 3500,
+  isExiting,
+  createdAt,
+  onClose,
+  onPauseTimer,
+  onResumeTimer,
+}) => {
+  const { t } = useTranslation();
+  const config = variantConfig[variant];
+  const Icon = config.Icon;
+  const [copied, setCopied] = React.useState(false);
+  const [ringPaused, setRingPaused] = React.useState(false);
+  const hover = useHoverPause({ createdAt, duration, onPauseTimer, onResumeTimer });
+  const handleMouseEnter = () => {
+    setRingPaused(true);
+    hover.handleMouseEnter();
+  };
+  const handleMouseLeave = () => {
+    setRingPaused(false);
+    hover.handleMouseLeave();
+  };
+
+  const handleCopyMeta = async () => {
+    if (!meta) return;
+    try {
+      await navigator.clipboard.writeText(meta);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch {}
+  };
+
+  const headline = title || description;
+  const body = title && description ? description : undefined;
+
+  return (
+    <div
+      role={variant === "destructive" ? "alert" : "status"}
+      className="px-5 pb-4 pt-4 text-white"
+      onMouseEnter={handleMouseEnter}
+      onMouseLeave={handleMouseLeave}
+    >
+      <div className="flex items-start gap-3">
+        <span className={cn("mt-0.5 shrink-0", config.iconClass)} aria-hidden="true">
+          {icon ?? <Icon className="size-5" strokeWidth={2} />}
+        </span>
+        <div className="min-w-0 flex-1 pt-px">
+          {headline && <p className="text-base font-semibold leading-6 text-white">{headline}</p>}
+        </div>
+        {onClose && (
+          <button
+            type="button"
+            onClick={onClose}
+            className={cn(
+              "relative -mr-1 -mt-1 flex size-9 shrink-0 items-center justify-center rounded-full",
+              "text-white/80 transition-colors hover:bg-white/10 hover:text-white",
+              "focus:outline-none focus-visible:ring-1 focus-visible:ring-white/40"
+            )}
+          >
+            <svg
+              className="pointer-events-none absolute inset-0 size-9 -rotate-90"
+              viewBox="0 0 36 36"
+              aria-hidden="true"
+            >
+              <circle
+                cx="18"
+                cy="18"
+                r={RING_RADIUS}
+                fill="none"
+                stroke="currentColor"
+                strokeOpacity="0.25"
+                strokeWidth="1.5"
+              />
+              {duration > 0 && !isExiting && (
+                <circle
+                  cx="18"
+                  cy="18"
+                  r={RING_RADIUS}
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="1.5"
+                  strokeLinecap="round"
+                  strokeDasharray={RING_CIRCUMFERENCE}
+                  style={{
+                    animation: `notice-ring ${duration}ms linear forwards`,
+                    animationPlayState: ringPaused ? "paused" : "running",
+                  }}
+                />
+              )}
+            </svg>
+            <X className="size-4" strokeWidth={2.2} />
+            <span className="sr-only">{t("common.close")}</span>
+          </button>
+        )}
+      </div>
+
+      {body && <p className="mt-2 text-sm leading-6 text-white/60">{body}</p>}
+
+      {(action || meta) && (
+        <div className="mt-3 flex items-center justify-between gap-3">
+          {meta ? (
+            <button
+              type="button"
+              onClick={handleCopyMeta}
+              className="flex min-w-0 items-center gap-1.5 rounded-md px-1 py-0.5 font-mono text-2xs text-white/35 transition-colors hover:bg-white/5 hover:text-white/60"
+              aria-label={t("common.copyError")}
+              title={t("common.copyError")}
+            >
+              <span className="truncate">{meta}</span>
+              {copied ? (
+                <Check className="size-3 shrink-0" />
+              ) : (
+                <Copy className="size-3 shrink-0" />
+              )}
+            </button>
+          ) : (
+            <span />
+          )}
+          {action && <div className="shrink-0">{action}</div>}
+        </div>
+      )}
+    </div>
+  );
+};
+
+const Toast: React.FC<ToastComponentProps> = ({
   title,
   description,
   action,
@@ -180,23 +345,14 @@ const Toast: React.FC<
 }) => {
   const { t } = useTranslation();
   const config = variantConfig[variant];
-  const pausedAtRef = React.useRef<number | null>(null);
   const [copied, setCopied] = React.useState(false);
   const isDestructive = variant === "destructive";
-
-  const handleMouseEnter = () => {
-    pausedAtRef.current = Date.now();
-    onPauseTimer();
-  };
-
-  const handleMouseLeave = () => {
-    if (pausedAtRef.current && duration > 0) {
-      const elapsed = pausedAtRef.current - createdAt;
-      const remaining = Math.max(duration - elapsed, 500);
-      onResumeTimer(remaining);
-    }
-    pausedAtRef.current = null;
-  };
+  const { handleMouseEnter, handleMouseLeave } = useHoverPause({
+    createdAt,
+    duration,
+    onPauseTimer,
+    onResumeTimer,
+  });
 
   const handleCopyError = async () => {
     if (!description) return;

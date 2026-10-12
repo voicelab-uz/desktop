@@ -219,9 +219,7 @@ function safeDesktopAudioUrl(value) {
 }
 
 function safeDesktopTranscriptionId(value) {
-  return typeof value === "string" && /^dst_[A-Za-z0-9_-]{1,256}$/.test(value)
-    ? value
-    : null;
+  return typeof value === "string" && /^dst_[A-Za-z0-9_-]{1,256}$/.test(value) ? value : null;
 }
 
 function safeTranscriptText(value) {
@@ -295,7 +293,11 @@ function normalizeDesktopSttResponse(payload) {
   if (canonical) {
     const id = root.id == null ? null : safeDesktopTranscriptionId(root.id);
     const revision = root.revision == null ? null : safeInteger(root.revision, { min: 1 });
-    if ((root.id != null && !id) || (root.revision != null && revision == null) || Boolean(id) !== Boolean(revision)) {
+    if (
+      (root.id != null && !id) ||
+      (root.revision != null && revision == null) ||
+      Boolean(id) !== Boolean(revision)
+    ) {
       return invalidResponse("transcription", requestId);
     }
     const audioAvailable = root.audio_available === true;
@@ -411,22 +413,48 @@ function normalizeDesktopUsage(payload) {
     rawEntitlement.used_seconds == null ? 0 : safeInteger(rawEntitlement.used_seconds);
   const reservedSeconds =
     rawEntitlement.reserved_seconds == null ? 0 : safeInteger(rawEntitlement.reserved_seconds);
-  const remainingSeconds = safeInteger(rawEntitlement.remaining_seconds);
+  // remaining_seconds is also omitted when it is zero (daily cap reached), so
+  // derive it from the other counters whenever the server leaves it out.
+  const remainingSeconds =
+    rawEntitlement.remaining_seconds == null
+      ? Number.isSafeInteger(usageLimitSeconds) &&
+        Number.isSafeInteger(usedSeconds) &&
+        Number.isSafeInteger(reservedSeconds)
+        ? Math.max(0, usageLimitSeconds - usedSeconds - reservedSeconds)
+        : null
+      : safeInteger(rawEntitlement.remaining_seconds);
   const windowStartsAt = validRfc3339(rawEntitlement.window_starts_at);
   const resetsAt = validRfc3339(rawEntitlement.resets_at);
-  if (
-    !planId ||
-    !planName ||
-    usageWindow !== "day" ||
-    !Number.isSafeInteger(usageLimitSeconds) ||
-    !Number.isSafeInteger(usedSeconds) ||
-    !Number.isSafeInteger(reservedSeconds) ||
-    !Number.isSafeInteger(remainingSeconds) ||
-    remainingSeconds !== Math.max(0, usageLimitSeconds - usedSeconds - reservedSeconds) ||
-    !windowStartsAt ||
-    !resetsAt ||
-    Date.parse(resetsAt) <= Date.parse(windowStartsAt)
-  ) {
+  const failedChecks = [
+    !planId && "plan_id",
+    !planName && "plan_name",
+    usageWindow !== "day" && "usage_window",
+    !Number.isSafeInteger(usageLimitSeconds) && "usage_limit_seconds",
+    !Number.isSafeInteger(usedSeconds) && "used_seconds",
+    !Number.isSafeInteger(reservedSeconds) && "reserved_seconds",
+    !Number.isSafeInteger(remainingSeconds) && "remaining_seconds",
+    remainingSeconds !== Math.max(0, usageLimitSeconds - usedSeconds - reservedSeconds) &&
+      "remaining_seconds_mismatch",
+    !windowStartsAt && "window_starts_at",
+    !resetsAt && "resets_at",
+    windowStartsAt &&
+      resetsAt &&
+      Date.parse(resetsAt) <= Date.parse(windowStartsAt) &&
+      "window_order",
+  ].filter(Boolean);
+  if (failedChecks.length > 0) {
+    authLogger.warn("Desktop usage response failed validation", {
+      requestId,
+      failedChecks,
+      keys: Object.keys(rawEntitlement),
+      usageLimitSeconds: rawEntitlement.usage_limit_seconds,
+      usedSeconds: rawEntitlement.used_seconds,
+      reservedSeconds: rawEntitlement.reserved_seconds,
+      remainingSeconds: rawEntitlement.remaining_seconds,
+      usageWindow,
+      windowStartsAt: rawEntitlement.window_starts_at,
+      resetsAt: rawEntitlement.resets_at,
+    });
     return invalidResponse("desktop usage", requestId);
   }
 
@@ -527,7 +555,8 @@ class VoiceLabApiClient {
     const isDesktopStt = method === "POST" && routePath === DESKTOP_STT_PATH;
     const isDesktopUsage = method === "GET" && routePath === DESKTOP_USAGE_PATH;
     const isDesktopProfile = method === "GET" && routePath === DESKTOP_PROFILE_PATH;
-    const isDesktopTranscriptions = routePath === DESKTOP_TRANSCRIPTIONS_PATH ||
+    const isDesktopTranscriptions =
+      routePath === DESKTOP_TRANSCRIPTIONS_PATH ||
       routePath.startsWith(`${DESKTOP_TRANSCRIPTIONS_PATH}/`);
     const isCanonicalDesktopBoundary =
       isDesktopStt || isDesktopUsage || isDesktopProfile || isDesktopTranscriptions;
@@ -857,7 +886,10 @@ class VoiceLabApiClient {
     }
     const root = record(body);
     return {
-      ...normalizeDesktopTranscriptionRecord(desktopRecordBody(root), safeRequestId(root.request_id)),
+      ...normalizeDesktopTranscriptionRecord(
+        desktopRecordBody(root),
+        safeRequestId(root.request_id)
+      ),
       requestId: safeRequestId(root.request_id),
     };
   }
@@ -893,7 +925,10 @@ class VoiceLabApiClient {
     }
     const root = record(body);
     return {
-      ...normalizeDesktopTranscriptionRecord(desktopRecordBody(root), safeRequestId(root.request_id)),
+      ...normalizeDesktopTranscriptionRecord(
+        desktopRecordBody(root),
+        safeRequestId(root.request_id)
+      ),
       requestId: safeRequestId(root.request_id),
     };
   }

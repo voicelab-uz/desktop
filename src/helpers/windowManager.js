@@ -1,4 +1,4 @@
-const { app, screen, BrowserWindow, dialog } = require("electron");
+const { app, screen, BrowserWindow, dialog, systemPreferences } = require("electron");
 const debugLogger = require("./debugLogger");
 const HotkeyManager = require("./hotkeyManager");
 const { isGlobeLikeHotkey } = HotkeyManager;
@@ -25,6 +25,7 @@ const {
   CONTROL_PANEL_CONFIG,
   AGENT_OVERLAY_CONFIG,
   NOTIFICATION_WINDOW_CONFIG,
+  ACCESSIBILITY_DROP_CONFIG,
   TRANSCRIPTION_PREVIEW_CONFIG,
   TRANSCRIPTION_PREVIEW_SIZE_LIMITS,
   WINDOW_SIZES,
@@ -42,6 +43,8 @@ class WindowManager {
     this.notificationWindow = null;
     this._notificationTimeout = null;
     this.transcriptionPreviewWindow = null;
+    this.accessibilityDropWindow = null;
+    this._accessibilityDropPoll = null;
     // Native notifications can be emitted before the renderer finishes loading.
     // Keep their preferences in the main process as well as the renderer store so
     // a disabled notification cannot reappear after an app restart.
@@ -1403,6 +1406,81 @@ class WindowManager {
         this._notificationTimeout = null;
       }
     });
+  }
+
+  /**
+   * macOS only: float a small "drag VoiceLab into the list" helper above
+   * System Settings while the Accessibility permission is still missing.
+   */
+  async showAccessibilityDrop() {
+    if (process.platform !== "darwin") return;
+    if (systemPreferences.isTrustedAccessibilityClient(false)) return;
+    if (this.accessibilityDropWindow && !this.accessibilityDropWindow.isDestroyed()) {
+      this.accessibilityDropWindow.showInactive();
+      return;
+    }
+
+    const display = screen.getDisplayNearestPoint(screen.getCursorScreenPoint());
+    const position = WindowPositionUtil.getAccessibilityDropPosition(display);
+    const window = new BrowserWindow({ ...ACCESSIBILITY_DROP_CONFIG, ...position });
+    this.accessibilityDropWindow = window;
+    hardenWindow(window);
+    window.setContentProtection(true);
+    WindowPositionUtil.setupAlwaysOnTop(window);
+
+    window.on("closed", () => {
+      if (this.accessibilityDropWindow === window) this.accessibilityDropWindow = null;
+      this._stopAccessibilityDropPoll();
+    });
+
+    try {
+      if (process.env.NODE_ENV === "development") {
+        await DevServerManager.waitForDevServer();
+        await window.loadURL(`${DevServerManager.DEV_SERVER_URL}?accessibility-drop=true`);
+      } else {
+        const fileInfo = DevServerManager.getAppFilePath(false);
+        await window.loadFile(fileInfo.path, {
+          query: { ...fileInfo.query, "accessibility-drop": "true" },
+        });
+      }
+    } catch (error) {
+      debugLogger.warn("Accessibility drop helper failed to load", { error: error?.message });
+      this.hideAccessibilityDrop();
+      return;
+    }
+
+    if (window.isDestroyed()) return;
+    window.showInactive();
+    this._startAccessibilityDropPoll();
+  }
+
+  hideAccessibilityDrop() {
+    this._stopAccessibilityDropPoll();
+    const window = this.accessibilityDropWindow;
+    this.accessibilityDropWindow = null;
+    if (window && !window.isDestroyed()) window.close();
+  }
+
+  _startAccessibilityDropPoll() {
+    this._stopAccessibilityDropPoll();
+    this._accessibilityDropPoll = setInterval(() => {
+      if (!systemPreferences.isTrustedAccessibilityClient(false)) return;
+      this.hideAccessibilityDrop();
+      for (const target of [this.controlPanelWindow, this.mainWindow]) {
+        if (target && !target.isDestroyed()) target.webContents.send("accessibility-granted");
+      }
+      if (this.controlPanelWindow && !this.controlPanelWindow.isDestroyed()) {
+        this.controlPanelWindow.show();
+        this.controlPanelWindow.focus();
+      }
+    }, 1000);
+  }
+
+  _stopAccessibilityDropPoll() {
+    if (this._accessibilityDropPoll) {
+      clearInterval(this._accessibilityDropPoll);
+      this._accessibilityDropPoll = null;
+    }
   }
 
   showNotificationWindow() {

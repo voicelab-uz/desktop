@@ -597,47 +597,47 @@
     "audioRecording": {
       "errorTitles": {
         "sessionExpired": "Sessiya muddati tugadi",
-        "offline": "You're Offline",
+        "offline": "Internet aloqasi yo‘q",
         "dailyLimitReached": "VoiceLab to‘lov/balans xatosi",
         "walletInsufficient": "VoiceLab to‘lov/balans xatosi",
         "walletChargeFailed": "Transkripsiya muvaffaqiyatsiz",
-        "providerRateLimited": "Provider Rate Limited"
+        "providerRateLimited": "So‘rovlar chegarasi"
       },
       "fallback": {
         "title": "VoiceLab qayta urinishi",
         "description": "Dastlabki so‘rov bajarilmadi va VoiceLab uni xavfsiz qayta yubordi."
       },
       "translationFallback": {
-        "unreachableTitle": "Translation unavailable",
-        "unreachableDescription": "Your dictation was pasted untranslated. Check the translation settings.",
-        "failedTitle": "Translation failed",
-        "failedDescription": "The original text was pasted. You can retry it from History."
+        "unreachableTitle": "Tarjima mavjud emas",
+        "unreachableDescription": "Diktovka tarjimasiz joylashtirildi. Tarjima sozlamalarini tekshiring.",
+        "failedTitle": "Tarjima bajarilmadi",
+        "failedDescription": "Asl matn joylashtirildi. Uni Tarix bo‘limidan qayta urinib ko‘rishingiz mumkin."
       },
       "noAudio": {
-        "title": "No Audio Detected",
-        "description": "The recording contained no detectable audio. Please try again."
+        "title": "Ovoz aniqlanmadi",
+        "description": "Yozuvda ovoz topilmadi. Mikrofonga yaqinroq gapirib, qayta urinib ko‘ring."
       },
       "micDisconnected": {
-        "title": "Microphone disconnected",
-        "description": "Recording is still active and will resume when a microphone is available.",
-        "meetingDescription": "The meeting is still recording system audio and will resume microphone capture automatically."
+        "title": "Mikrofon uzildi",
+        "description": "Yozuv davom etmoqda, mikrofon ulangach avtomatik tiklanadi.",
+        "meetingDescription": "Uchrashuv tizim ovozini yozishda davom etmoqda, mikrofon avtomatik tiklanadi."
       },
       "micRestored": {
-        "title": "Microphone restored",
-        "description": "Audio capture has resumed."
+        "title": "Mikrofon tiklandi",
+        "description": "Ovoz yozish davom etmoqda."
       },
       "partialTranscription": {
-        "title": "Partial Transcription",
-        "description": "Part of the recording couldn't be transcribed."
+        "title": "Qisman transkripsiya",
+        "description": "Yozuvning bir qismini matnga aylantirib bo‘lmadi."
       },
       "errorDescriptions": {
         "sessionExpired": "VoiceLab Cloud sessiyasi tugadi. Sozlamalar orqali qayta kiring.",
-        "offline": "You're offline. Cloud transcription requires an internet connection.",
+        "offline": "Internet aloqasi yo‘q. Bulutli transkripsiya uchun internet kerak.",
         "dailyLimitReached": "VoiceLab limitingiz tugagan yoki AI Credit balansingiz yetarli emas. Billing’ni ochib, qayta urinib ko‘ring.",
         "walletInsufficient": "VoiceLab AI Credit balansingiz yetarli emas. Billing orqali to‘ldirib, qayta urinib ko‘ring.",
         "walletChargeFailed": "VoiceLab to‘lovni yakunlay olmadi. Birozdan keyin qayta urinib ko‘ring.",
         "authRequired": "VoiceLab Cloud uchun VoiceLab hisobiga kiring.",
-        "providerRateLimited": "Your transcription provider rate-limited the request. Wait a moment and try again."
+        "providerRateLimited": "So‘rovlar vaqtincha cheklandi. Biroz kutib, qayta urinib ko‘ring."
       }
     },
     "clipboard": {
@@ -3181,7 +3181,9 @@
       "refreshHint": "VoiceLab saytida tarifni o‘zgartirgach yangilang.",
       "refreshing": "Yangilanmoqda…",
       "refresh": "Yangilash",
-      "intervals": { "month": "oy" }
+      "intervals": {
+        "month": "oy"
+      }
     },
     "creditShortage": {
       "title": "Ko‘proq AI Credit kerak",
@@ -3213,88 +3215,292 @@
       }
     },
     "onboarding": {
-      "progress": {
-        "welcome": "Boshlash",
-        "mode": "Qanday ishlaydi",
-        "language-permissions": "Moslashtirish",
-        "hotkey": "Tugma",
-        "ready": "Tayyor"
+      "sections": {
+        "getStarted": "Boshlash",
+        "permissions": "Ruxsatlar",
+        "setUp": "Sozlash",
+        "learn": "O‘rganish",
+        "personalize": "Shaxsiylashtirish"
+      },
+      "nav": {
+        "progress": "Sozlash jarayoni",
+        "stepCount": "{{current}}-qadam, jami {{total}}",
+        "startSetup": "Sozlashni boshlash",
+        "finish": "Yakunlash",
+        "uiLanguage": "Interfeys tili"
       },
       "welcome": {
-        "title": "VoiceLab",
-        "description": "Qayerda ishlasangiz ham, aytganlaringizni matnga aylantiring. Tayyor bo‘lganingizda diktovni sozlash uchun kiring.",
-        "preferences": "VoiceLab tizimingizdagi ko‘rinish va tildan boshlaydi."
-      },
-      "howItWorks": {
-        "title": "Qanday ishlaydi",
-        "description": "Tabiiy gapiring. VoiceLab so‘zlaringizni ishlatayotgan ilovangizda matnga aylantiradi.",
+        "titlePrefix": "VoiceLab —",
+        "titleAccent": "har qanday ilovada",
+        "titleSuffix": " ishlaydigan ovozdan matn.",
+        "description": "Oddiy gapiring. VoiceLab so‘zlaringizni kursor turgan joyga toza matn qilib yozadi: xabarlar, xatlar, hujjatlar va boshqalar.",
         "speak": "Gapiring",
         "voicelab": "VoiceLab",
         "text": "Matn"
       },
-      "personalize": {
-        "title": "O‘zingizga moslang",
-        "description": "O‘zingizga qulay til va ko‘rinishni tanlang.",
-        "language": "Til",
+      "signin": {
+        "title": "VoiceLab hisobingizni ulang",
+        "description": "Hisobingiz bulutli transkripsiyani ochadi va tarixingizni bir joyda saqlaydi.",
+        "connected": "Xush kelibsiz!",
+        "connectedDescription": "VoiceLab hisobingiz tayyor. Endi kompyuteringizni sozlaymiz.",
+        "continuing": "Davom etilmoqda…",
+        "benefitCloud": "O‘zbek, rus va ingliz tillarida bulutli transkripsiya",
+        "benefitHistory": "Diktovka tarixingiz hisobingizda saqlanadi",
+        "benefitSecurity": "Parolingiz desktop ilovaga hech qachon kirmaydi"
+      },
+      "aboutYou": {
+        "title": "O‘zingiz haqingizda aytib bering",
+        "description": "Nima ish bilan shug‘ullanasiz? Bu VoiceLab’ga lug‘atingizni tushunishga yordam beradi.",
+        "roles": {
+          "developer": "Dasturchi",
+          "founder": "Asoschi / rahbar",
+          "product": "Mahsulot",
+          "marketing": "Marketing",
+          "sales": "Savdo",
+          "operations": "Operatsiyalar",
+          "student": "Talaba",
+          "educator": "O‘qituvchi",
+          "writer": "Yozuvchi",
+          "creator": "Kontent yaratuvchi",
+          "consultant": "Konsultant",
+          "legal": "Huquq",
+          "healthcare": "Tibbiyot",
+          "support": "Mijozlarni qo‘llab-quvvatlash",
+          "other": "Boshqa"
+        }
+      },
+      "typingPlaces": {
+        "title": "Ko‘proq qayerda yozasiz?",
+        "description": "Bu VoiceLab’ni ish joyingizga moslashga yordam beradi. Mos keladiganlarini tanlang.",
+        "options": {
+          "messages": "Xabar yozish",
+          "emails": "Xat yozish",
+          "documents": "Hujjat tayyorlash",
+          "notes": "Eslatma olish",
+          "ai": "AI bilan suhbat",
+          "coding": "AI bilan kod yozish",
+          "posts": "Post va izohlar",
+          "other": "Boshqa"
+        }
+      },
+      "privacy": {
+        "title": "Ma’lumotlaringiz sizning nazoratingizda",
+        "description": "VoiceLab bu kompyuterda nimani saqlashi va nimani ulashishini o‘zingiz hal qiling.",
+        "historyTitle": "Diktovka tarixini shu qurilmada saqlash",
+        "historyDescription": "Oldingi diktovkalarni VoiceLab ichida qidirish va qayta ishlatish imkonini beradi.",
+        "usageTitle": "Anonim foydalanish ma’lumotlarini ulashish",
+        "usageDescription": "Xatolarni topish va VoiceLab’ni yaxshilashga yordam beradi. Audio yoki matningiz hech qachon yuborilmaydi.",
+        "note": "Audio VoiceLab Cloud’ga faqat matnga aylantirish uchun yuboriladi. Bularni istalgan vaqt Sozlamalarda o‘zgartirishingiz mumkin."
+      },
+      "permissions": {
+        "headerInProgress": "VoiceLab’ga kompyuteringizda ruxsat bering",
+        "headerComplete": "Ishonchingiz uchun rahmat. Maxfiyligingiz biz uchun muhim.",
+        "description": "VoiceLab bulardan faqat siz diktovka qilayotganda foydalanadi.",
+        "microphoneTitle": "VoiceLab’ga mikrofondan foydalanishga ruxsat bering",
+        "microphoneDescription": "VoiceLab faqat tugmani ishlatganingizda tinglaydi.",
+        "microphoneHelp": "Mikrofon faol bo‘lganda VoiceLab buni ko‘rsatib turadi.",
+        "microphoneSuccess": "Endi VoiceLab mikrofoningizdan foydalana oladi",
+        "accessibilityTitle": "VoiceLab’ga matn kiritishga ruxsat bering",
+        "accessibilityDescription": "Bu natijani siz ishlayotgan matn maydoniga yozish imkonini beradi.",
+        "accessibilityHelp": "“Ruxsat berish”ni bosgach, Accessibility ro‘yxatida VoiceLab’ni yoqing va qaytib keling.",
+        "accessibilitySuccess": "Endi VoiceLab istalgan joyga yoza oladi",
+        "allow": "Ruxsat berish",
+        "notice": "Bularni keyinroq System Settings’da ham o‘zgartirishingiz mumkin."
+      },
+      "micTest": {
+        "title": "Mikrofoningizni tekshiring",
+        "subtitle": "O‘rnatilgan yoki simli mikrofonni tavsiya qilamiz. Bluetooth qurilmalar unchalik ishonchli emas.",
+        "instruction": "Gapirganingizda ustunlar harakatlanyaptimi?",
+        "live": "Jonli",
+        "heard": "Sizni eshityapmiz!",
+        "speakToContinue": "Davom etish uchun gapiring",
+        "changeMic": "Mikrofonni almashtirish",
+        "defaultMic": "Tizim mikrofoni (standart)",
+        "refresh": "Qurilmalarni yangilash",
+        "quickTipLabel": "Maslahat",
+        "quickTip": "Simli garnitura yoki stol mikrofoni ham sekin diktovka uchun yaxshi ishlaydi.",
+        "errors": {
+          "notAllowedTitle": "Mikrofonga ruxsat kerak",
+          "notAllowedBody": "VoiceLab ishlashi uchun mikrofon kerak. System Settings’da ruxsat bering va qayta urinib ko‘ring.",
+          "notFoundTitle": "Mikrofon topilmadi",
+          "notFoundBody": "Mikrofonni ulang yoki u yoqilganini tekshiring.",
+          "inUseTitle": "Mikrofon band",
+          "inUseBody": "Boshqa ilova mikrofonni ushlab turgan bo‘lishi mumkin. Zoom, Teams, Meet yoki FaceTime’ni yopib, qayta urinib ko‘ring.",
+          "unknownTitle": "Mikrofon xatosi",
+          "unknownBody": "VoiceLab mikrofoningizni ishga tushira olmadi. Boshqa qurilmani sinab ko‘ring."
+        }
+      },
+      "shortcut": {
+        "title": "Diktovka tugmasini sinab ko‘ring",
+        "subtitleHold": "Gapirayotganda ⟪KEY⟫ tugmasini bosib turing. VoiceLab ovozingizni matnga aylantiradi.",
+        "subtitleTap": "Boshlash uchun ⟪KEY⟫ tugmasini bosing, gapiring, tugatish uchun yana bosing.",
+        "instruction": "Bosganingizda tugma yonyaptimi?",
+        "detected": "Ishlayapti!",
+        "pressHint": "Klaviaturadagi tugmani bosing!",
+        "works": "Tugma aniqlandi",
+        "change": "Tugmani o‘zgartirish",
+        "no": "Yo‘q",
+        "yes": "Ha",
+        "capture": "Diktovka uchun ishlatmoqchi bo‘lgan tugma yoki kombinatsiyani bosing.",
+        "recommend": "Klaviaturaning pastki chap burchagidagi fn tugmasini tavsiya qilamiz: qo‘l ostida va yozishga xalaqit bermaydi."
+      },
+      "dictationLanguage": {
+        "title": "Qaysi tilda gapirasiz?",
+        "description": "VoiceLab o‘zbek, rus va ingliz tillarini matnga aylantiradi.",
+        "auto": "Avtomatik aniqlash",
+        "autoDescription": "Tilni VoiceLab o‘zi aniqlasin",
+        "changeLater": "Buni istalgan vaqt Sozlamalarda o‘zgartirishingiz mumkin."
+      },
+      "tryItIntro": {
+        "titleHold": "⟪KEY⟫ tugmasini bosib turganingizda VoiceLab tinglay boshlaydi",
+        "titleTap": "⟪KEY⟫ tugmasini bosganingizda VoiceLab tinglay boshlaydi",
+        "subtitleHold": "Qo‘yib yuborganingizda aytganlaringizni yozib qo‘yadi.",
+        "subtitleTap": "Yana bosganingizda aytganlaringizni yozib qo‘yadi.",
+        "cta": "Sinab ko‘ring!"
+      },
+      "tryIt": {
+        "subtitleHold": "⟪KEY⟫ tugmasini bosib turing, gapiring va matn kiritilishi uchun qo‘yib yuboring.",
+        "subtitleTap": "⟪KEY⟫ tugmasini bosing, gapiring, matn kiritilishi uchun yana bosing.",
+        "placeholderHold": "⟪KEY⟫ tugmasini bosib turing, biror narsa ayting, keyin qo‘yib yuboring.",
+        "placeholderTap": "⟪KEY⟫ tugmasini bosing, biror narsa ayting, keyin yana bosing.",
+        "greetingFallback": "do‘stim",
+        "clickTextbox": "Avval matn maydoniga bosing!",
+        "wellDone": "Ajoyib!",
+        "trySaying": "Sinab ko‘ring:",
+        "message": {
+          "titlePrefix": "VoiceLab bilan ",
+          "titleAccent": "xabar",
+          "titleSuffix": " yozing",
+          "windowTitle": "Xabarlar",
+          "greeting": "Salom {{firstName}}, VoiceLab ishlayaptimi?",
+          "sample": "Salom! Ha, VoiceLab zo‘r ishlayapti. Ertaga soat o‘nda uchrashamiz.",
+          "afterwards": "VoiceLab ortiqcha so‘zlarni olib tashlab, tinish belgilarini qo‘ydi."
+        },
+        "email": {
+          "titlePrefix": "Xatda ",
+          "titleAccent": "aqlli formatlash",
+          "titleSuffix": "ni sinab ko‘ring",
+          "windowTitle": "Yangi xat",
+          "toLabel": "Kimga:",
+          "toValue": "Jasur",
+          "subjectLabel": "Mavzu:",
+          "subjectValue": "Uchrashuv rejasi",
+          "sample": "Mmm salom Jasur. Yaqinda gaplashaylik. Juma kuni soat uchda, yo‘q aslida to‘rtda bo‘shmisiz? Hurmat bilan, Aziz",
+          "afterwards": "“Yo‘q aslida to‘rtda” kabi o‘z-o‘zini tuzatishlar avtomatik hal qilinadi."
+        },
+        "list": {
+          "titlePrefix": "",
+          "titleAccent": "Ro‘yxat",
+          "titleSuffix": " aytib ko‘ring",
+          "windowTitle": "Eslatmalar",
+          "pageTitle": "Xarid ro‘yxati",
+          "sample": "Do‘kondan bir nechta narsa olishim kerak: non, chips, muzqaymoq.",
+          "afterwards": "VoiceLab kontekstga qarab ro‘yxat va qadamlarni formatlaydi."
+        }
+      },
+      "timeSavings": {
+        "title": "Zo‘r!",
+        "spoke": "Siz daqiqasiga {{count}} so‘z gapirdingiz.",
+        "generic": "Gapirish yozishdan ancha tez, VoiceLab esa sizga bemalol yetib boradi.",
+        "faster": "{{multiplier}}× tezroq",
+        "fasterSubtitle": "o‘rtacha yozish tezligidan",
+        "yourVoice": "Sizning ovozingiz",
+        "avgTyping": "O‘rtacha yozish tezligi",
+        "wpm": "{{count}} so‘z/daq",
+        "sliderLabel": "Kuniga yozishga ketadigan vaqt",
+        "hours": "{{count}} soat",
+        "savePrefix": "VoiceLab bilan haftasiga",
+        "saveHours": "{{count}} soat",
+        "saveSuffix": "tejashingiz mumkin!"
+      },
+      "writingNeeds": {
+        "title": "Yozish bilan munosabatingiz haqida gaplashaylik.",
+        "description": "Qanday yozishingizni bilish VoiceLab sizga qayerda foydali bo‘lishini topishga yordam beradi.",
+        "options": {
+          "captureIdeas": "G‘oyalarni tez yozib olishim kerak",
+          "draftDocuments": "Hujjatlarni kamroq kuch bilan tayyorlashim kerak",
+          "manyEmails": "Ko‘p xat yozishimga to‘g‘ri keladi",
+          "manyMessages": "Ko‘p xabar yozishimga to‘g‘ri keladi",
+          "typingTiring": "Yozish charchatadi yoki noqulay",
+          "handsFree": "Qo‘lsiz yoki yo‘lda ishlashim kerak",
+          "aiPrompts": "AI uchun batafsilroq so‘rovlar yozmoqchiman",
+          "codeWithAi": "AI bilan osonroq kod yozmoqchiman"
+        }
+      },
+      "personalizeIntro": {
+        "titlePrefix": "Endi",
+        "titleAccent": "o‘zingizning",
+        "titleSuffix": "VoiceLab’ingizni sozlaymiz",
+        "description": "VoiceLab turli yozuv turlarida diktovkangizni qanday formatlashini tanlang.",
         "appearance": "Ko‘rinish",
         "light": "Yorug‘",
         "dark": "Qorong‘i",
-        "system": "Tizim"
+        "system": "Tizim",
+        "later": "Keyinroq sozlash"
       },
-      "permissions": {
-        "title": "Ovozingizni sozlang",
-        "description": "Ruxsatlarni bering va diktantni boshlaydigan tugmani tanlang.",
-        "microphone": "Mikrofon",
-        "microphoneDescription": "Diktovingizni eshitish uchun kerak.",
-        "textInsertion": "Matn kiritish",
-        "textInsertionDescription": "Natijani boshqa ilovalarga yozish uchun kerak.",
-        "allow": "Ruxsat berish",
-        "granted": "Ruxsat berildi",
-        "shortcut": "Tugma",
-        "try": "Sinab ko‘ring",
-        "tryPlaceholder": "Tugmani o‘zgartiring, so‘ng uni bosib yoki ushlab shu yerda gapiring.",
-        "tryHint": "Tugma sizga yoqsa, davom eting.",
-        "holdToDictate": "Diktant uchun {{shortcut}} tugmasini bosib turing.",
-        "pressShortcut": "Tekshirish uchun tugmani bir marta bosing.",
-        "shortcutDetected": "Tugma aniqlandi. Hammasi tayyor.",
-        "required": "Davom etish uchun kerakli ruxsatlarni bering.",
-        "permissionNotice": "Buni keyin Sozlamalarda ruxsat berishingiz mumkin."
+      "style": {
+        "titlePrefix": "Siz",
+        "titleSuffix": "ni qanday yozasiz?",
+        "legend": "Belgilangan joylar nima o‘zgarishini ko‘rsatadi: so‘z va bosh harflar ajratilgan, tinish belgilari ko‘k rangda.",
+        "names": {
+          "casual": "Erkin",
+          "formal": "Rasmiy",
+          "excited": "Hayajonli!"
+        },
+        "hints": {
+          "casual": "Kam tinish belgisi, erkin uslub",
+          "formal": "To‘liq tinish belgilari, sayqallangan uslub",
+          "excited": "Ko‘proq undov belgilari!"
+        },
+        "personal": {
+          "subject": "shaxsiy xabarlar",
+          "description": "Bu uslubni shaxsiy xabarlarga qo‘llaymiz.",
+          "samples": {
+            "casual": "[salom] ertaga tushlikka bo‘shmisan? [soat] 12 bo‘lsa senga qulay",
+            "formal": "[Salom]{,} ertaga tushlikka bo‘shmisan? [Soat] 12 bo‘lsa senga qulay{.}"
+          }
+        },
+        "work": {
+          "subject": "ish xabarlari",
+          "description": "Bu uslubni ish xabarlariga qo‘llaymiz.",
+          "samples": {
+            "casual": "[salom] bo‘sh bo‘lsangiz ajoyib natijalar haqida gaplashaylik",
+            "formal": "[Salom]{,} bo‘sh bo‘lsangiz{,} ajoyib natijalar haqida gaplashaylik{.}",
+            "excited": "[Salom]{,} bo‘sh bo‘lsangiz{,} ajoyib natijalar haqida gaplashaylik{!}"
+          }
+        },
+        "email": {
+          "subject": "xatlar",
+          "description": "Bu uslubni xatlarga qo‘llaymiz.",
+          "samples": {
+            "casual": "[Salom] Aziz{,} bugun siz bilan suhbatlashish juda yoqimli bo‘ldi. [Keyingi] suhbatni kutaman{.}\n\nHurmat bilan,\nMalika",
+            "formal": "[Salom] Aziz{,}\n\n[Bugun] siz bilan suhbatlashish juda yoqimli bo‘ldi. [Keyingi] suhbatni kutaman{.}\n\nHurmat bilan,\nMalika",
+            "excited": "[Salom] Aziz{,}\n\n[Bugun] siz bilan suhbatlashish juda yoqimli bo‘ldi. [Keyingi] suhbatni kutaman{!}\n\nHurmat bilan,\nMalika"
+          }
+        },
+        "other": {
+          "subject": "boshqa ilovalar",
+          "description": "Bu uslubni boshqa barcha ilovalarga qo‘llaymiz.",
+          "samples": {
+            "casual": "[Hozircha] yangi mashg‘ulot rejimi [menga] yoqyapti.\n\n[Ertangi] mashg‘ulotni intiqlik bilan kutyapman ayniqsa yaxshi dam olganimdan keyin.",
+            "formal": "[Hozircha] yangi mashg‘ulot rejimi [menga] yoqmoqda.\n\n[Ertangi] mashg‘ulotni intiqlik bilan kutmoqdaman{,} ayniqsa yaxshi dam olganimdan keyin.",
+            "excited": "[Hozircha] yangi mashg‘ulot rejimi [menga] yoqyapti.\n\n[Ertangi] mashg‘ulotni intiqlik bilan kutyapman{,} ayniqsa yaxshi dam olganimdan keyin{!}"
+          }
+        }
       },
-      "advanced": {
-        "title": "Qo‘shimcha sozlash",
-        "description": "VoiceLab Cloud hisobisiz lokal model yoki o‘z provideringizdan foydalaning.",
-        "localTitle": "Lokal model",
-        "localDescription": "Audio qurilmada qoladi va AI Credit sarflanmaydi.",
-        "providerTitle": "O‘z providerim",
-        "providerDescription": "API kalitni keyin qo‘shimcha sozlamalarda ulang.",
-        "useCloud": "VoiceLab Cloud bilan davom etish"
-      },
-      "mode": {
-        "localTitle": "Lokal rejim",
-        "localDescription": "Whisper tillari va avtomatik aniqlash mavjud.",
-        "providerTitle": "Provider rejimi",
-        "providerDescription": "Sozlash tugagach provider va API kalitni ulang."
-      },
-      "language": {
-        "title": "Til va ruxsatlar",
-        "description": "Odatda qaysi tilda gapirishingizni tanlang.",
-        "loadingCapabilities": "Hisobingiz uchun mavjud tillar tekshirilmoqda…",
-        "capabilitiesUnavailable": "Cloud imkoniyatlarini tekshirib bo‘lmadi. Tilni baribir tanlashingiz mumkin.",
-        "unsupported": "Bu til tanlangan rejimda ishlamaydi. Boshqa tilni tanlang.",
-        "microphoneRequired": "Davom etish uchun mikrofon ruxsati kerak."
-      },
-      "hotkey": {
-        "title": "Tugma va tezkor sinov",
-        "description": "Tugmani belgilang, gapiring va natijani tekshiring.",
-        "placeholder": "Natija shu yerda ko‘rinadi…"
+      "finish": {
+        "title": "Endi VoiceLab’ni boshqa ilovada sinab ko‘ring",
+        "subtitle": "Qo‘shimcha sozlash shart emas.",
+        "step1": "Istalgan ilovani oching",
+        "step2": "Matn maydoniga bosing",
+        "step3Hold": "⟪KEY⟫ tugmasini bosib turib gapiring",
+        "step3Tap": "⟪KEY⟫ tugmasini bosib gapiring",
+        "note": "VoiceLab menyu panelida turadi. Tarix va sozlamalarni ko‘rish uchun istalgan vaqt oching.",
+        "signInTitle": "Oxirgi qadam",
+        "signInRequired": "Sozlashni yakunlash uchun VoiceLab hisobingizga kiring."
       },
       "ready": {
-        "title": "Tayyor",
-        "greeting": "Salom, {{name}}",
-        "account": "VoiceLab hisobingiz ulandi.",
-        "local": "Lokal transkripsiya tanlandi.",
-        "provider": "Providerni ulash uchun qo‘shimcha sozlamalarni oching.",
-        "start": "Diktantni boshlash"
+        "greeting": "Salom, {{name}}"
       }
     },
     "dictionary": {
@@ -3350,6 +3556,12 @@
       "protected": "Faol va himoyalangan",
       "signedOut": "Hisobga kirilmagan",
       "signedOutDescription": "VoiceLab Cloud’dan foydalanish uchun kiring."
+    },
+    "accessibilityDrop": {
+      "instruction": "{{permission}} ruxsati uchun {{app}}ni yuqoridagi ro‘yxatga sudrab tashlang",
+      "permission": "Accessibility",
+      "hide": "Yashirish",
+      "dragHint": "Sudrang"
     }
   }
 }

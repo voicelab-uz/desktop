@@ -268,7 +268,11 @@ export const usePermissions = (
         const promptedGranted = await window.electronAPI?.promptAccessibilityPermission?.();
         if (promptedGranted) {
           setAccessibilityPermissionGranted(true);
+          return;
         }
+        // macOS opened System Settings from its own prompt. Float the drag helper
+        // so the app can be dropped into the Accessibility list if it is not listed.
+        void window.electronAPI?.showAccessibilityDrop?.();
         return;
       }
 
@@ -303,6 +307,20 @@ export const usePermissions = (
       if (result) setMicPermissionGranted(result.granted);
     });
   }, [enabled, setMicPermissionGranted]);
+
+  // The main process watches the permission while the drag helper is open and
+  // reports the grant; mirror it here so the UI updates immediately.
+  useEffect(() => {
+    if (!enabled) return undefined;
+    const unsubscribe = window.electronAPI?.onAccessibilityGranted?.(() => {
+      setAccessibilityPermissionGranted(true);
+    });
+    return () => unsubscribe?.();
+  }, [enabled, setAccessibilityPermissionGranted]);
+
+  useEffect(() => {
+    if (accessibilityPermissionGranted) void window.electronAPI?.hideAccessibilityDrop?.();
+  }, [accessibilityPermissionGranted]);
 
   // On macOS, re-validate accessibility permission on mount to override stale
   // localStorage values (e.g. after app update changes the code signature).

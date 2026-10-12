@@ -51,6 +51,7 @@ function assertTrustedIpcSender(event, channel, windowManager) {
     windowManager?.agentWindow,
     windowManager?.notificationWindow,
     windowManager?.transcriptionPreviewWindow,
+    windowManager?.accessibilityDropWindow,
   ].filter(Boolean);
   if (!senderWindow || !knownWindows.includes(senderWindow)) {
     const error = new Error("IPC sender window is not registered");

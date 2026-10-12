@@ -289,9 +289,18 @@ export function getRecordingErrorTitle(error: RecordingError, t: TFunction): str
   return error.title;
 }
 
-export function getRecordingErrorDescription(error: RecordingError, t: TFunction): string {
+/** "server_code · req_id" for support, or an empty string when neither is known. */
+export function getRecordingErrorDiagnostics(error: RecordingError): string {
+  return [error.serverCode, error.requestId].filter(Boolean).join(" · ");
+}
+
+export function getRecordingErrorDescription(
+  error: RecordingError,
+  t: TFunction,
+  { includeDiagnostics = true }: { includeDiagnostics?: boolean } = {}
+): string {
   const withDiagnostics = (description: string) => {
-    const diagnostic = [error.serverCode, error.requestId].filter(Boolean).join(" · ");
+    const diagnostic = includeDiagnostics ? getRecordingErrorDiagnostics(error) : "";
     return diagnostic ? `${description} (${diagnostic})` : description;
   };
   const copy = getCopy(error.code);

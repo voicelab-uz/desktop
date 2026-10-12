@@ -11,6 +11,7 @@ import {
   getRecordingErrorDescription,
   getRecordingRecoveryAction,
   getRecordingRecoveryActionLabel,
+  getRecordingErrorDiagnostics,
 } from "../utils/recordingErrors";
 import { isAccessibilitySkipped } from "../utils/permissions";
 import { signInWithSocial } from "../lib/auth";
@@ -172,7 +173,8 @@ export const useAudioRecording = (toast, options = {}) => {
           return;
         }
         const title = getRecordingErrorTitle(error, t);
-        const description = getRecordingErrorDescription(error, t);
+        const description = getRecordingErrorDescription(error, t, { includeDiagnostics: false });
+        const meta = getRecordingErrorDiagnostics(error);
         const recovery =
           error?.code === "CONCURRENCY_LIMIT" && error?.retryAfterSeconds
             ? null
@@ -183,7 +185,7 @@ export const useAudioRecording = (toast, options = {}) => {
               {
                 type: "button",
                 className:
-                  "rounded-md border border-current/20 px-2.5 py-1 text-xs font-semibold transition-colors hover:bg-white/10",
+                  "rounded-full bg-white px-4 py-1.5 text-sm font-semibold text-black transition-colors hover:bg-white/85",
                 onClick: async () => {
                   if (recovery === "auth") {
                     const result = await signInWithSocial("google");
@@ -209,6 +211,7 @@ export const useAudioRecording = (toast, options = {}) => {
         toast({
           title,
           description,
+          meta,
           variant: "destructive",
           duration: error.code === "AUTH_EXPIRED" ? 8000 : undefined,
           action: recoveryAction,

@@ -234,6 +234,10 @@ const fullElectronAPI = {
   checkAccessibilityPermission: (silent) =>
     ipcRenderer.invoke("check-accessibility-permission", silent),
   promptAccessibilityPermission: () => ipcRenderer.invoke("prompt-accessibility-permission"),
+  showAccessibilityDrop: () => ipcRenderer.invoke("show-accessibility-drop"),
+  hideAccessibilityDrop: () => ipcRenderer.invoke("hide-accessibility-drop"),
+  accessibilityDropStartDrag: () => ipcRenderer.send("accessibility-drop-start-drag"),
+  onAccessibilityGranted: registerListener("accessibility-granted", (callback) => () => callback()),
   readClipboard: () => ipcRenderer.invoke("read-clipboard"),
   writeClipboard: (text) => ipcRenderer.invoke("write-clipboard", text),
   checkPasteTools: () => ipcRenderer.invoke("check-paste-tools"),

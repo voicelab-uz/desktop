@@ -334,12 +334,14 @@
 
   /* Make dictation window (App) transparent, but keep control panel solid */
   body:has(.dictation-window),
-  body:has(.meeting-notification-window) {
+  body:has(.meeting-notification-window),
+  body:has(.accessibility-drop-window) {
     background: transparent;
   }
 
   body:has(.dictation-window) #root,
-  body:has(.meeting-notification-window) #root {
+  body:has(.meeting-notification-window) #root,
+  body:has(.accessibility-drop-window) #root {
     background: transparent;
   }
 
@@ -438,6 +440,84 @@
   color: #ff746d;
 }
 
+/* The dictation pill. The chrome lives on .voice-morph so the same surface can
+   grow into a notice card (anchored bottom-right) and shrink back again. */
+.voice-morph {
+  position: relative;
+  margin-left: auto;
+  overflow: hidden;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 22px;
+  background: rgba(8, 8, 8, 0.96);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.06);
+  will-change: width, height;
+  transition:
+    width 340ms cubic-bezier(0.22, 1, 0.36, 1),
+    height 340ms cubic-bezier(0.22, 1, 0.36, 1),
+    border-radius 340ms cubic-bezier(0.22, 1, 0.36, 1),
+    border-color 180ms cubic-bezier(0.16, 1, 0.3, 1),
+    background-color 180ms cubic-bezier(0.16, 1, 0.3, 1),
+    box-shadow 380ms ease;
+}
+
+.voice-morph:has(.voice-morph__button:hover) {
+  border-color: rgba(255, 255, 255, 0.26);
+  background: rgba(18, 18, 18, 0.98);
+}
+
+.voice-morph[data-expanded="true"] {
+  border-radius: 18px;
+  border-color: rgba(255, 255, 255, 0.1);
+  background: #121212;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.05),
+    0 18px 40px -16px rgba(0, 0, 0, 0.7),
+    0 4px 12px -4px rgba(0, 0, 0, 0.4);
+}
+
+.voice-morph__notice {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  opacity: 0;
+  transform: translateY(6px);
+  pointer-events: none;
+  transition:
+    opacity 160ms ease,
+    transform 240ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.voice-morph[data-expanded="true"] .voice-morph__notice {
+  opacity: 1;
+  transform: translateY(0);
+  pointer-events: auto;
+  transition:
+    opacity 220ms ease 200ms,
+    transform 300ms cubic-bezier(0.22, 1, 0.36, 1) 200ms;
+}
+
+.voice-morph__button {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  opacity: 1;
+  transition: opacity 160ms ease 200ms;
+}
+
+.voice-morph[data-expanded="true"] .voice-morph__button {
+  opacity: 0;
+  pointer-events: none;
+  transition-delay: 0ms;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .voice-morph,
+  .voice-morph__notice,
+  .voice-morph__button {
+    transition: none;
+  }
+}
+
 .voice-control-island {
   display: flex;
   width: 74px;
@@ -445,34 +525,32 @@
   align-items: center;
   justify-content: center;
   padding: 0 14px;
-  border: 1px solid rgba(255, 255, 255, 0.14);
   border-radius: 22px;
-  background: rgba(8, 8, 8, 0.96);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.06);
   color: rgba(255, 255, 255, 0.94);
-  transition:
-    border-color 180ms cubic-bezier(0.16, 1, 0.3, 1),
-    background-color 180ms cubic-bezier(0.16, 1, 0.3, 1);
-}
-
-.voice-control-island--hover,
-button:hover .voice-control-island {
-  border-color: rgba(255, 255, 255, 0.26);
-  background: rgba(18, 18, 18, 0.98);
+  transition: color 180ms cubic-bezier(0.16, 1, 0.3, 1);
 }
 
 .voice-control-island--recording {
   color: #ff6359;
-  border-color: rgba(255, 99, 89, 0.4);
 }
 
 .voice-control-island--processing {
   color: rgba(255, 255, 255, 0.88);
-  border-color: rgba(255, 255, 255, 0.22);
 }
 
 .voice-control-island--unavailable {
   color: #ffb457;
+}
+
+.voice-morph[data-expanded="false"]:has(.voice-control-island--recording) {
+  border-color: rgba(255, 99, 89, 0.4);
+}
+
+.voice-morph[data-expanded="false"]:has(.voice-control-island--processing) {
+  border-color: rgba(255, 255, 255, 0.22);
+}
+
+.voice-morph[data-expanded="false"]:has(.voice-control-island--unavailable) {
   border-color: rgba(255, 180, 86, 0.36);
 }
 
@@ -684,6 +762,35 @@ a:hover {
     inset 0 1px 0 oklch(1 0 0 / 0.04),
     0 8px 24px -4px oklch(0 0 0 / 0.5),
     0 2px 8px -2px oklch(0 0 0 / 0.3);
+}
+
+.notice-card {
+  background: #121212;
+  border: 1px solid rgb(255 255 255 / 9%);
+  box-shadow:
+    inset 0 1px 0 rgb(255 255 255 / 5%),
+    0 18px 40px -16px rgb(0 0 0 / 70%),
+    0 4px 12px -4px rgb(0 0 0 / 40%);
+}
+
+@keyframes notice-card-in {
+  from {
+    opacity: 0;
+    transform: translateY(10px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes notice-ring {
+  from {
+    stroke-dashoffset: 0;
+  }
+  to {
+    stroke-dashoffset: 94.25;
+  }
 }
 
 @keyframes toast-progress {
@@ -1397,6 +1504,205 @@ body:has(.agent-overlay-window) #root {
   }
   to {
     opacity: 1;
+  }
+}
+
+/* ---------------------------------------------------------------------------
+ * Onboarding surface: the app's own neutral palette, mapped to the tokens the
+ * onboarding components use so light and dark mode follow the theme.
+ * ------------------------------------------------------------------------- */
+.onboarding-root {
+  --onb-bg: var(--color-background);
+  --onb-card: var(--color-background);
+  --onb-card-border: var(--color-border);
+  --onb-panel: var(--color-muted);
+  --onb-accent: var(--color-primary);
+  --onb-accent-soft: color-mix(in oklch, var(--color-primary) 7%, transparent);
+  --onb-accent-foreground: var(--color-primary-foreground);
+  --onb-ink: var(--color-foreground);
+  --onb-ink-muted: var(--color-muted-foreground);
+  --onb-key: var(--color-background);
+  --onb-key-border: var(--color-border-active);
+  --onb-key-shadow: 0 2px 0 var(--color-border-active);
+  --onb-success: var(--color-success);
+}
+
+.onboarding-step-enter {
+  animation: onboarding-step-in 520ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.onboarding-step-enter[data-direction="back"] {
+  animation-name: onboarding-step-in-back;
+}
+
+.onboarding-stagger > * {
+  animation: onboarding-rise 560ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.onboarding-stagger > *:nth-child(1) {
+  animation-delay: 40ms;
+}
+.onboarding-stagger > *:nth-child(2) {
+  animation-delay: 110ms;
+}
+.onboarding-stagger > *:nth-child(3) {
+  animation-delay: 180ms;
+}
+.onboarding-stagger > *:nth-child(4) {
+  animation-delay: 250ms;
+}
+.onboarding-stagger > *:nth-child(5) {
+  animation-delay: 320ms;
+}
+.onboarding-stagger > *:nth-child(6) {
+  animation-delay: 390ms;
+}
+.onboarding-stagger > *:nth-child(n + 7) {
+  animation-delay: 450ms;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .onboarding-step-enter,
+  .onboarding-stagger > *,
+  .onboarding-pattern {
+    animation: none !important;
+  }
+}
+
+@keyframes onboarding-step-in {
+  from {
+    opacity: 0;
+    transform: translateX(28px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+@keyframes onboarding-step-in-back {
+  from {
+    opacity: 0;
+    transform: translateX(-28px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+@keyframes onboarding-rise {
+  from {
+    opacity: 0;
+    transform: translateY(14px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes onboarding-pattern-drift {
+  from {
+    transform: translate3d(0, 0, 0) scale(1);
+  }
+  to {
+    transform: translate3d(-1.5%, 1%, 0) scale(1.03);
+  }
+}
+
+@keyframes onboarding-bubble-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes onboarding-sticker-pop {
+  0% {
+    opacity: 0;
+    transform: rotate(-8deg) scale(0.6);
+  }
+  100% {
+    opacity: 1;
+    transform: rotate(-4deg) scale(1);
+  }
+}
+
+@keyframes onboarding-bar-grow {
+  from {
+    width: 0;
+  }
+}
+
+@keyframes onboarding-list-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes onboarding-key-press {
+  0%,
+  100% {
+    transform: translateY(0);
+    box-shadow: var(--onb-key-shadow);
+  }
+  45%,
+  60% {
+    transform: translateY(2px);
+    box-shadow: 0 0 0 rgb(0 0 0 / 0%);
+  }
+}
+
+@keyframes onboarding-key-glow {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 var(--onb-accent-soft);
+  }
+  50% {
+    box-shadow: 0 0 0 14px rgb(242 84 53 / 0%);
+  }
+}
+
+@keyframes onboarding-wave {
+  0%,
+  100% {
+    transform: scaleY(0.35);
+  }
+  50% {
+    transform: scaleY(1);
+  }
+}
+
+@keyframes onboarding-celebrate {
+  0% {
+    opacity: 0;
+    transform: translate(0, 0) scale(0.4) rotate(0deg);
+  }
+  20% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+    transform: translate(var(--dx), var(--dy)) scale(1) rotate(var(--rot));
+  }
+}
+
+@keyframes onboarding-progress-shimmer {
+  from {
+    background-position: 0% 50%;
+  }
+  to {
+    background-position: 200% 50%;
   }
 }
 

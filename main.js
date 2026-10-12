@@ -39,6 +39,10 @@ if (process.platform === "darwin") {
 
 const path = require("path");
 const tls = require("tls");
+const {
+  syncMacosFnKeyPolicy,
+  restoreMacosFnKeyPolicySync,
+} = require("./src/helpers/macosFnKeyPolicy");
 // Development may load local configuration. Packaged builds never load or ship
 // a project-level .env; user-provided credentials live in the encrypted user profile.
 if (!app.isPackaged) {
@@ -1325,9 +1329,23 @@ async function startApp() {
       }
     });
 
+    // The system's own fn action (Emoji picker, input switcher) must not fire
+    // while fn/Globe is the dictation key: the listener swallows bare presses.
+    const syncFnKeyPolicy = () => {
+      const dictationUsesFn = hotkeyManager.getSlotHotkeys("dictation").some(isGlobeLikeHotkey);
+      globeKeyManager.setSwallowFn(dictationUsesFn);
+      void syncMacosFnKeyPolicy(dictationUsesFn, globeKeyManager.resolveListenerBinary());
+    };
+
     syncSuppressedMouseButtons();
     globeKeyManager.start();
-    hotkeyManager.once("hotkey-loaded", syncSuppressedMouseButtons);
+    // Hotkeys may already be registered by now; sync once immediately and
+    // again when the manager reports the loaded set.
+    syncFnKeyPolicy();
+    hotkeyManager.once("hotkey-loaded", () => {
+      syncSuppressedMouseButtons();
+      syncFnKeyPolicy();
+    });
 
     onTrustedIpc("hotkey-listening-mode-changed", (_event, enabled) => {
       if (typeof enabled !== "boolean") return;
@@ -1359,6 +1377,7 @@ async function startApp() {
       mouseButtonIsRecording = false;
       mouseButtonLastStopTime = 0;
       syncSuppressedMouseButtons();
+      syncFnKeyPolicy();
     });
   }
 
@@ -1670,7 +1689,10 @@ function performSyncTeardown() {
   } else {
     globalShortcut.unregisterAll();
   }
-  if (globeKeyManager) globeKeyManager.stop();
+  if (globeKeyManager) {
+    globeKeyManager.stop();
+    restoreMacosFnKeyPolicySync(globeKeyManager.resolveListenerBinary());
+  }
   if (windowsKeyManager) windowsKeyManager.stop();
   if (linuxKeyManager) linuxKeyManager.stop();
   if (meetingDetectionEngine) meetingDetectionEngine.stop();

@@ -809,6 +809,10 @@ declare global {
       // Clipboard operations
       checkAccessibilityPermission: (silent?: boolean) => Promise<boolean>;
       promptAccessibilityPermission: () => Promise<boolean>;
+      showAccessibilityDrop?: () => Promise<{ success: boolean }>;
+      hideAccessibilityDrop?: () => Promise<{ success: boolean }>;
+      accessibilityDropStartDrag?: () => void;
+      onAccessibilityGranted?: (callback: () => void) => () => void;
       readClipboard: () => Promise<string>;
       writeClipboard: (text: string) => Promise<{ success: boolean }>;
       checkPasteTools: () => Promise<PasteToolsResult>;

@@ -37,10 +37,7 @@ test("a pending update stays reachable from the sign-in gate", () => {
     "the banner must render inside the sign-in gate branch, not elsewhere"
   );
 
-  const onboarding = router.slice(
-    router.indexOf("isControlPanel && showOnboarding"),
-    authGate
-  );
+  const onboarding = router.slice(router.indexOf("isControlPanel && showOnboarding"), authGate);
   assert.doesNotMatch(
     onboarding,
     /<UpdateAvailableBanner/,
@@ -61,16 +58,16 @@ test("browser sign-in starts only after an explicit user action", () => {
 
 test("onboarding requires account authorization on its final step", () => {
   const onboarding = read("src/components/OnboardingFlow.tsx");
+  const done = read("src/components/onboarding/DoneStep.tsx");
 
   assert.match(onboarding, /useAuth\(\)/);
-  assert.match(onboarding, /step === "ready" \? \(/);
-  assert.match(onboarding, /\{!isSignedIn && \(/);
-  assert.match(onboarding, /<AuthenticationStep onAuthComplete=\{\(\) => \{\}\} \/>/);
-  assert.match(onboarding, /3cf7eb296abc1ebbce4daafaf641a4f0\.jpg/);
-  assert.match(onboarding, /grid flex-1 grid-cols-\[minmax\(0,0\.86fr\)_minmax\(0,1\.14fr\)\]/);
-  assert.match(onboarding, /className="h-full w-full object-cover"/);
-  assert.match(onboarding, /absolute left-1\/2 top-8 z-10 flex -translate-x-1\/2/);
-  assert.match(onboarding, /Make every word sound like it belongs\./);
+  assert.match(onboarding, /case "finish":/);
+  assert.match(onboarding, /const finish = useCallback\(\(\) => \{\n\s*if \(!isSignedIn\) return;/);
+  assert.match(onboarding, /\(step === "finish" && isSignedIn\)/);
+  assert.match(onboarding, /const primaryAction = isLastStep \? finish : goNext/);
+  assert.match(onboarding, /disabled=\{!canContinue\}/);
+  assert.match(done, /if \(!isSignedIn\) \{/);
+  assert.match(done, /<AuthenticationStep onAuthComplete=\{\(\) => \{\}\} \/>/);
 });
 
 test("a newly signed-in user receives a typed greeting before entering the app", () => {
@@ -157,11 +154,18 @@ test("macOS Chromium profile storage never opens the system Keychain", () => {
   assert.ok(ready === -1 || mockKeychain < ready, "switch must be registered before app ready");
 });
 
-test("onboarding navigation uses an existing translated common action", () => {
+test("onboarding navigation uses existing translated common actions", () => {
   const onboarding = read("src/components/OnboardingFlow.tsx");
 
-  assert.match(onboarding, /t\("common\.next"\)/);
-  assert.doesNotMatch(onboarding, /t\("common\.continue"\)/);
+  assert.match(onboarding, /t\("common\.continue"\)/);
+  assert.match(onboarding, /t\("common\.back"\)/);
+  assert.match(onboarding, /t\("common\.skip"\)/);
+  for (const locale of ["en", "uz", "ru"]) {
+    const common = JSON.parse(read(`src/locales/${locale}/translation.json`)).common;
+    for (const key of ["continue", "back", "skip"]) {
+      assert.ok(typeof common[key] === "string" && common[key].trim(), `${locale} common.${key}`);
+    }
+  }
 });
 
 test("onboarding navigation actions keep one consistent footprint", () => {
@@ -169,19 +173,22 @@ test("onboarding navigation actions keep one consistent footprint", () => {
   const sharedNavClass = /className=\{ONBOARDING_NAV_BUTTON_CLASS\}/g;
 
   assert.match(onboarding, /const ONBOARDING_NAV_BUTTON_CLASS = "min-w-28"/);
-  assert.equal((onboarding.match(sharedNavClass) || []).length, 5);
+  assert.equal((onboarding.match(sharedNavClass) || []).length, 3);
 });
 
 test("onboarding personalizes interface language and appearance without the settings context", () => {
   const onboarding = read("src/components/OnboardingFlow.tsx");
+  const personalize = read("src/components/onboarding/PersonalizeIntroStep.tsx");
 
-  assert.match(onboarding, /ONBOARDING_UI_LANGUAGES/);
+  assert.match(onboarding, /UI_LANGUAGES/);
   assert.match(onboarding, /value: "uz"/);
   assert.match(onboarding, /value: "en"/);
   assert.match(onboarding, /value: "ru"/);
-  assert.match(onboarding, /onClick=\{\(\) => setUiLanguage\(language\.value\)\}/);
-  assert.match(onboarding, /onClick=\{\(\) => setTheme\(option\.value\)\}/);
-  assert.doesNotMatch(onboarding, /useSettings\(\)/);
+  assert.match(onboarding, /onValueChange=\{setUiLanguage\}/);
+  assert.match(personalize, /onClick=\{\(\) => setTheme\(option\.value\)\}/);
+  for (const source of [onboarding, personalize]) {
+    assert.doesNotMatch(source, /useSettings\(\)/);
+  }
   assert.doesNotMatch(onboarding, /WindowControls/);
   assert.doesNotMatch(onboarding, /<header/);
   assert.match(onboarding, /<footer className="[^"]*shrink-0/);
@@ -190,28 +197,32 @@ test("onboarding personalizes interface language and appearance without the sett
 
 test("onboarding setup asks only for needed access and saves the chosen shortcut", () => {
   const onboarding = read("src/components/OnboardingFlow.tsx");
+  const permissionsStep = read("src/components/onboarding/PermissionsStep.tsx");
+  const shortcutStep = read("src/components/onboarding/ShortcutStep.tsx");
+  const tryItStep = read("src/components/onboarding/TryItStep.tsx");
   const hotkeyInput = read("src/components/ui/HotkeyInput.tsx");
   const controlPanelPreload = read("preloads/control-panel.js");
 
-  assert.match(onboarding, /platform === "darwin" \? "Fn" : getDefaultHotkey\(\)/);
-  assert.match(onboarding, /permissions\.requestMicPermission/);
-  assert.match(onboarding, /needsTextInsertionPermission/);
-  assert.match(onboarding, /permissions\.requestAccessibilityPermission/);
-  assert.match(onboarding, /useSystemAudioPermission/);
-  assert.match(onboarding, /canManageSystemAudioInApp\(systemAudio\)/);
-  assert.match(onboarding, /systemAudio\.request/);
-  assert.doesNotMatch(onboarding, /requestSystemAudioPermission/);
-  assert.match(onboarding, /<HotkeyInput/);
-  assert.match(onboarding, /variant="onboarding"/);
-  assert.doesNotMatch(onboarding, /function ShortcutKeyboard/);
+  assert.match(onboarding, /dictationKey \|\| getDefaultHotkey\(\)/);
+  assert.match(permissionsStep, /permissions\.requestMicPermission/);
+  assert.match(permissionsStep, /needsTextInsertionPermission/);
+  assert.match(permissionsStep, /permissions\.requestAccessibilityPermission/);
+  // Meeting system-audio access is configured in Settings, not during first-run setup.
+  assert.doesNotMatch(onboarding, /useSystemAudioPermission|systemAudio\.request/);
+  assert.match(shortcutStep, /<HotkeyInput/);
+  assert.match(shortcutStep, /variant="onboarding"/);
+  assert.doesNotMatch(shortcutStep, /function ShortcutKeyboard/);
   assert.match(hotkeyInput, /function MacFnKeycap/);
   assert.match(hotkeyInput, /<Globe2/);
-  assert.match(onboarding, /role="switch"/);
-  assert.match(onboarding, /\(step === "hotkey" && setupPermissionsGranted\)/);
   assert.match(onboarding, /setDictationKey\(value\)/);
-  assert.doesNotMatch(onboarding, /onShortcutTested|setShortcutTestMode|isShortcutDetected|ConfettiBurst/);
-  assert.doesNotMatch(onboarding, /onDictationComplete/);
-  assert.doesNotMatch(onboarding, /Textarea/);
+  for (const source of [onboarding, shortcutStep, tryItStep]) {
+    assert.doesNotMatch(
+      source,
+      /onShortcutTested|setShortcutTestMode|isShortcutDetected|ConfettiBurst/
+    );
+  }
+  // The practice screen listens for the completed dictation the main process already broadcasts.
+  assert.match(tryItStep, /onDictationComplete/);
   assert.match(onboarding, /<main className="[^"]*overflow-hidden/);
   assert.doesNotMatch(onboarding, /overflow-y-auto/);
   assert.doesNotMatch(onboarding, /variant="hero"/);

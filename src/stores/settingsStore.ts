@@ -175,6 +175,7 @@ const ARRAY_SETTINGS = new Set([
   "snippets",
   "gcalAccounts",
   "onboardingUseCases",
+  "onboardingWritingNeeds",
   "translationTargets",
 ]);
 
@@ -691,6 +692,12 @@ export interface SettingsState
   setMeetingHotkeyLayoutMode: (mode: "side-panel" | "full-width") => void;
   setOnboardingUseCases: (useCases: string[]) => void;
   setOnboardingUseCaseNote: (note: string) => void;
+  setOnboardingRole: (role: string) => void;
+  setOnboardingWritingNeeds: (needs: string[]) => void;
+  setWritingStylePersonal: (style: string) => void;
+  setWritingStyleWork: (style: string) => void;
+  setWritingStyleEmail: (style: string) => void;
+  setWritingStyleOther: (style: string) => void;
   setActivationMode: (mode: "tap" | "push") => void;
 
   setPreferBuiltInMic: (value: boolean) => void;
@@ -991,6 +998,12 @@ export const useSettingsStore = create<SettingsState>()((set, get) => ({
   translationKey: readString("translationKey", ""),
   onboardingUseCases: readStringArray("onboardingUseCases", []),
   onboardingUseCaseNote: readString("onboardingUseCaseNote", ""),
+  onboardingRole: readString("onboardingRole", ""),
+  onboardingWritingNeeds: readStringArray("onboardingWritingNeeds", []),
+  writingStylePersonal: readString("writingStylePersonal", ""),
+  writingStyleWork: readString("writingStyleWork", ""),
+  writingStyleEmail: readString("writingStyleEmail", ""),
+  writingStyleOther: readString("writingStyleOther", ""),
   meetingHotkeyLayoutMode: (readString("meetingHotkeyLayoutMode", "full-width") === "side-panel"
     ? "side-panel"
     : "full-width") as "side-panel" | "full-width",
@@ -1658,6 +1671,15 @@ export const useSettingsStore = create<SettingsState>()((set, get) => ({
   },
 
   setOnboardingUseCaseNote: createStringSetter("onboardingUseCaseNote"),
+  setOnboardingRole: createStringSetter("onboardingRole"),
+  setOnboardingWritingNeeds: (needs: string[]) => {
+    if (isBrowser) localStorage.setItem("onboardingWritingNeeds", JSON.stringify(needs));
+    set({ onboardingWritingNeeds: needs });
+  },
+  setWritingStylePersonal: createStringSetter("writingStylePersonal"),
+  setWritingStyleWork: createStringSetter("writingStyleWork"),
+  setWritingStyleEmail: createStringSetter("writingStyleEmail"),
+  setWritingStyleOther: createStringSetter("writingStyleOther"),
 
   setActivationMode: (mode: "tap" | "push") => {
     if (isBrowser) localStorage.setItem("activationMode", mode);
