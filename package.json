@@ -1,6 +1,6 @@
 {
   "name": "voicelab-desktop",
-  "version": "1.2.2",
+  "version": "1.3.0",
   "description": "VoiceLab Desktop — account-based cloud dictation powered by VoiceLab",
   "desktopName": "voicelab.desktop",
   "main": "main.js",
