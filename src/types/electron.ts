@@ -43,6 +43,46 @@ export type DesktopProfile = {
   requestId: string;
 };
 
+export type DesktopOnboardingProfile = {
+  role: string;
+  useCases: string[];
+  dictationLanguage: string;
+  writingStyle: string;
+  uiLanguage: string;
+  theme: string;
+  appVersion: string;
+  platform: string;
+  revision: number;
+  completedAt: string;
+  updatedAt: string;
+  requestId: string;
+};
+
+export type DesktopOnboardingInput = {
+  role?: string;
+  useCases?: string[];
+  dictationLanguage?: string;
+  writingStyle?: string;
+  uiLanguage?: string;
+  theme?: string;
+  completedAt?: string;
+};
+
+export type DesktopOnboardingSaveResult =
+  | { success: true; revision: number; requestId: string | null }
+  | { success: false; code: string; retryable?: boolean };
+
+export type IslandMeetingState = {
+  recording: boolean;
+  calendarConnected: boolean;
+  nextEvent: {
+    id: string;
+    summary: string;
+    startTime: string | null;
+    endTime: string | null;
+  } | null;
+};
+
 export type TranscriptionErrorCode =
   | "TIMEOUT"
   | "NETWORK"
@@ -791,7 +831,9 @@ declare global {
       onTranscriptionUpdated?: (callback: (item: TranscriptionItem) => void) => () => void;
       onTranscriptionDeleted?: (callback: (payload: { id: number }) => void) => () => void;
       onTranscriptionsCleared?: (callback: (payload: { cleared: number }) => void) => () => void;
-      onDictationComplete?: (callback: (payload: { text: string }) => void) => () => void;
+      onDictationComplete?: (
+        callback: (payload: { text: string; durationMs?: number | null }) => void
+      ) => () => void;
 
       getUiLanguage: () => Promise<string>;
       saveUiLanguage: (language: string) => Promise<{ success: boolean; language: string }>;
@@ -1119,6 +1161,15 @@ declare global {
       authCancelBrowser?: () => Promise<DesktopAuthStatus>;
       authGetStatus?: () => Promise<DesktopAuthStatus>;
       authGetProfile?: () => Promise<DesktopProfile | null>;
+      islandGetMeetingState?: () => Promise<IslandMeetingState>;
+      islandStartMeeting?: () => Promise<{ success: boolean; alreadyRecording?: boolean }>;
+      islandOpenNotes?: () => Promise<{ success: boolean }>;
+      islandOpenIntegrations?: () => Promise<{ success: boolean }>;
+      onShowIntegrations?: (callback: () => void) => () => void;
+      desktopOnboardingGet?: () => Promise<DesktopOnboardingProfile | null>;
+      desktopOnboardingSave?: (
+        profile: DesktopOnboardingInput
+      ) => Promise<DesktopOnboardingSaveResult>;
       authRefreshSession?: () => Promise<DesktopAuthStatus>;
       authLogout?: () => Promise<{ success: boolean; revoked: boolean }>;
       authDeleteAccount?: () => Promise<{ success: boolean }>;
@@ -1611,6 +1662,7 @@ declare global {
         language?: string;
         noteId?: number | null;
         systemAudioCaptureEnabled?: boolean;
+        mode?: "meeting" | "dictation";
       }) => Promise<{
         success: boolean;
         error?: string;
@@ -1659,6 +1711,9 @@ declare global {
         ) => void
       ) => () => void;
       onMeetingTranscriptionError?: (callback: (error: string) => void) => () => void;
+      onMeetingTranscriptionHalted?: (
+        callback: (payload: { code: string; message: string }) => void
+      ) => () => void;
 
       // Speaker diarization
       downloadDiarizationModels?: () => Promise<{ success: boolean; error?: string }>;
@@ -1826,7 +1881,10 @@ declare global {
         flushed?: boolean;
       }) => Promise<{ success: boolean; streamed?: boolean; text?: string }>;
       dismissDictationPreview?: () => Promise<{ success: boolean }>;
-      completeDictationPreview?: (payload: { text?: string }) => Promise<{ success: boolean }>;
+      completeDictationPreview?: (payload: {
+        text?: string;
+        durationMs?: number;
+      }) => Promise<{ success: boolean }>;
       hideDictationPreview?: () => Promise<{ success: boolean }>;
       resizeTranscriptionPreviewWindow?: (
         width: number,

@@ -11,7 +11,6 @@ import {
   getRecordingErrorDescription,
   getRecordingRecoveryAction,
   getRecordingRecoveryActionLabel,
-  getRecordingErrorDiagnostics,
 } from "../utils/recordingErrors";
 import { isAccessibilitySkipped } from "../utils/permissions";
 import { signInWithSocial } from "../lib/auth";
@@ -174,7 +173,6 @@ export const useAudioRecording = (toast, options = {}) => {
         }
         const title = getRecordingErrorTitle(error, t);
         const description = getRecordingErrorDescription(error, t, { includeDiagnostics: false });
-        const meta = getRecordingErrorDiagnostics(error);
         const recovery =
           error?.code === "CONCURRENCY_LIMIT" && error?.retryAfterSeconds
             ? null
@@ -211,7 +209,6 @@ export const useAudioRecording = (toast, options = {}) => {
         toast({
           title,
           description,
-          meta,
           variant: "destructive",
           duration: error.code === "AUTH_EXPIRED" ? 8000 : undefined,
           action: recoveryAction,
@@ -249,7 +246,14 @@ export const useAudioRecording = (toast, options = {}) => {
           result.text = expandSnippets(result.text, getSettings().snippets);
 
           setTranscript(result.text);
-          window.electronAPI?.completeDictationPreview?.({ text: result.text });
+          // The recorded audio length lets onboarding report a real speaking
+          // rate; wall-clock timing in the renderer is not reliable for that.
+          const durationMs =
+            result.audioDurationMs ?? manager.lastAudioMetadata?.durationMs ?? null;
+          window.electronAPI?.completeDictationPreview?.({
+            text: result.text,
+            ...(Number.isFinite(durationMs) && durationMs > 0 ? { durationMs } : {}),
+          });
 
           if (result.warning) {
             toast({

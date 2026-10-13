@@ -423,6 +423,14 @@ export default function ControlPanel({ initialSettingsSection }: ControlPanelPro
     return () => cleanup?.();
   }, []);
 
+  useEffect(() => {
+    const cleanup = window.electronAPI?.onShowIntegrations?.(() => {
+      setShowSettings(false);
+      setActiveView("integrations");
+    });
+    return () => cleanup?.();
+  }, []);
+
   const handleMeetingRecordingRequestHandled = useCallback(
     () => setMeetingRecordingRequest(null),
     []

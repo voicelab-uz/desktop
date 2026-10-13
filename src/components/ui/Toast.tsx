@@ -203,7 +203,6 @@ export type NoticeContentProps = ToastComponentProps;
 export const NoticeContent: React.FC<NoticeContentProps> = ({
   title,
   description,
-  meta,
   icon,
   action,
   variant = "default",
@@ -217,7 +216,6 @@ export const NoticeContent: React.FC<NoticeContentProps> = ({
   const { t } = useTranslation();
   const config = variantConfig[variant];
   const Icon = config.Icon;
-  const [copied, setCopied] = React.useState(false);
   const [ringPaused, setRingPaused] = React.useState(false);
   const hover = useHoverPause({ createdAt, duration, onPauseTimer, onResumeTimer });
   const handleMouseEnter = () => {
@@ -227,15 +225,6 @@ export const NoticeContent: React.FC<NoticeContentProps> = ({
   const handleMouseLeave = () => {
     setRingPaused(false);
     hover.handleMouseLeave();
-  };
-
-  const handleCopyMeta = async () => {
-    if (!meta) return;
-    try {
-      await navigator.clipboard.writeText(meta);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
-    } catch {}
   };
 
   const headline = title || description;
@@ -304,29 +293,7 @@ export const NoticeContent: React.FC<NoticeContentProps> = ({
 
       {body && <p className="mt-2 text-sm leading-6 text-white/60">{body}</p>}
 
-      {(action || meta) && (
-        <div className="mt-3 flex items-center justify-between gap-3">
-          {meta ? (
-            <button
-              type="button"
-              onClick={handleCopyMeta}
-              className="flex min-w-0 items-center gap-1.5 rounded-md px-1 py-0.5 font-mono text-2xs text-white/35 transition-colors hover:bg-white/5 hover:text-white/60"
-              aria-label={t("common.copyError")}
-              title={t("common.copyError")}
-            >
-              <span className="truncate">{meta}</span>
-              {copied ? (
-                <Check className="size-3 shrink-0" />
-              ) : (
-                <Copy className="size-3 shrink-0" />
-              )}
-            </button>
-          ) : (
-            <span />
-          )}
-          {action && <div className="shrink-0">{action}</div>}
-        </div>
-      )}
+      {action && <div className="mt-3 flex justify-end">{action}</div>}
     </div>
   );
 };

@@ -70,9 +70,13 @@ export default function TryItStep({
   }, [hotkey, markStart]);
 
   useEffect(() => {
-    const unsubscribe = window.electronAPI?.onDictationComplete?.(({ text }) => {
+    const unsubscribe = window.electronAPI?.onDictationComplete?.(({ text, durationMs }) => {
       const finishedAt = Date.now();
       const startedAt = startedAtRef.current;
+      // Prefer the recorded audio length; the key-press timestamp only
+      // approximates it and can be far too short.
+      const recordedSeconds =
+        typeof durationMs === "number" && durationMs > 0 ? durationMs / 1000 : null;
       // Text insertion pastes into the focused textarea on its own; give it a
       // moment, then make sure the result is visible even if the paste missed.
       window.setTimeout(() => {
@@ -81,7 +85,8 @@ export default function TryItStep({
       setDone(true);
       onComplete({
         words: countWords(text),
-        seconds: startedAt ? Math.max(1, (finishedAt - startedAt) / 1000) : null,
+        seconds:
+          recordedSeconds ?? (startedAt ? Math.max(1, (finishedAt - startedAt) / 1000) : null),
       });
     });
     return () => unsubscribe?.();

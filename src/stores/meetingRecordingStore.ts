@@ -57,9 +57,14 @@ interface RecentSystemSpeaker {
   updatedAt: number;
 }
 
+export type RecordingMode = "meeting" | "dictation";
+
 interface MeetingRecordingState {
   isRecording: boolean;
   isTranscribing: boolean;
+  // "meeting" captures mic plus system audio into the transcript; "dictation"
+  // captures the mic only and types every finished phrase into the note body.
+  recordingMode: RecordingMode;
   recordingNoteId: number | null;
   recordingNoteTitle: string | null;
   recordingFolderId: number | null;
@@ -425,6 +430,7 @@ let pushConfigTimeout: ReturnType<typeof setTimeout> | null = null;
 export const useMeetingRecordingStore = create<MeetingRecordingState>()(() => ({
   isRecording: false,
   isTranscribing: false,
+  recordingMode: "meeting",
   recordingNoteId: null,
   recordingNoteTitle: null,
   recordingFolderId: null,
@@ -713,21 +719,28 @@ export interface StartRecordingArgs {
   seedSegments?: TranscriptSegment[];
   diarizationEnabled?: boolean | null;
   expectedCount?: number | null;
+  mode?: RecordingMode;
 }
 
 export async function startRecording(args: StartRecordingArgs): Promise<void> {
   if (isRecordingFlag || isStartingFlag) return;
   isStartingFlag = true;
 
-  const initialEnabled =
-    args.diarizationEnabled ??
-    (getSettings() as { speakerDiarizationEnabled?: boolean }).speakerDiarizationEnabled ??
-    true;
+  const mode: RecordingMode = args.mode ?? "meeting";
+  const isDictation = mode === "dictation";
+  const initialEnabled = isDictation
+    ? false
+    : (args.diarizationEnabled ??
+      (getSettings() as { speakerDiarizationEnabled?: boolean }).speakerDiarizationEnabled ??
+      true);
   const initialCount = Math.max(
     1,
     Math.min(MAX_SPEAKER_COUNT, args.expectedCount ?? DEFAULT_EXPECTED_SPEAKER_COUNT)
   );
-  const systemAudioCaptureEnabled = getSettings().systemAudioCaptureEnabled !== false;
+  // Dictation never listens to system audio: only the person's own voice
+  // belongs in the note they are writing.
+  const systemAudioCaptureEnabled =
+    !isDictation && getSettings().systemAudioCaptureEnabled !== false;
   systemAudioCaptureEnabledForSession = systemAudioCaptureEnabled;
 
   const systemAudioAccessPromise =
@@ -755,6 +768,7 @@ export async function startRecording(args: StartRecordingArgs): Promise<void> {
   useMeetingRecordingStore.setState({
     isRecording: true,
     isTranscribing: true,
+    recordingMode: mode,
     recordingNoteId: args.noteId,
     recordingNoteTitle: args.noteTitle,
     recordingFolderId: args.folderId,
@@ -789,6 +803,8 @@ export async function startRecording(args: StartRecordingArgs): Promise<void> {
     const [startResult, micResult, initialSystemCaptureResult] = await Promise.all([
       window.electronAPI?.meetingTranscriptionStart?.({
         ...getMeetingTranscriptionOptions(),
+        systemAudioCaptureEnabled,
+        mode,
         noteId: args.noteId ?? null,
       }),
       getMeetingMicConstraints().then(async (constraints) => {
@@ -1058,6 +1074,17 @@ export async function startRecording(args: StartRecordingArgs): Promise<void> {
       logger.error("Meeting transcription stream error", { error: err }, "meeting");
     });
     if (errorCleanup) ipcCleanups.push(errorCleanup);
+
+    // The account cannot transcribe any further (allowance used up, plan or
+    // session ended): end the recording and keep the transcript captured so far.
+    const haltedCleanup = window.electronAPI?.onMeetingTranscriptionHalted?.((payload) => {
+      useMeetingRecordingStore.setState({
+        error: payload?.message || "Meeting transcription stopped.",
+      });
+      logger.error("Meeting transcription halted", { code: payload?.code }, "meeting");
+      void stopRecording();
+    });
+    if (haltedCleanup) ipcCleanups.push(haltedCleanup);
 
     if (startResult.oneOnOneAttendee) {
       const synthetic: SpeakerIdentification = {

@@ -10,6 +10,10 @@ interface TimeSavingsStepProps {
 
 const AVERAGE_TYPING_WPM = 40;
 const ILLUSTRATIVE_SPEAKING_WPM = 130;
+// Conversational speech tops out well under this; anything above means the
+// timing was wrong (for example a late key-press timestamp), so the step falls
+// back to the illustrative figure instead of showing an impossible number.
+const MAX_PLAUSIBLE_SPEAKING_WPM = 260;
 const WORK_DAYS_PER_WEEK = 5;
 
 function useCountUp(target: number, duration = 900): number {
@@ -38,7 +42,10 @@ export default function TimeSavingsStep({ stats }: TimeSavingsStepProps) {
   const [hoursPerDay, setHoursPerDay] = useState(2);
   const measuredWpm =
     stats && stats.seconds ? Math.round((stats.words / stats.seconds) * 60) : null;
-  const hasMeasurement = measuredWpm !== null && measuredWpm > AVERAGE_TYPING_WPM;
+  const hasMeasurement =
+    measuredWpm !== null &&
+    measuredWpm > AVERAGE_TYPING_WPM &&
+    measuredWpm <= MAX_PLAUSIBLE_SPEAKING_WPM;
   const voiceWpm = hasMeasurement ? measuredWpm : ILLUSTRATIVE_SPEAKING_WPM;
   const multiplier = Math.max(1, Math.round((voiceWpm / AVERAGE_TYPING_WPM) * 10) / 10);
   const savedFraction = Math.max(0, 1 - AVERAGE_TYPING_WPM / voiceWpm);
@@ -88,7 +95,7 @@ export default function TimeSavingsStep({ stats }: TimeSavingsStepProps) {
       <Card className="mt-5 max-w-lg space-y-2.5 px-5 py-4">
         {rows.map((row) => {
           const Icon = row.icon;
-          const width = `${Math.max(16, Math.round((row.wpm / maxWpm) * 100))}%`;
+          const width = `${Math.max(6, Math.round((row.wpm / maxWpm) * 100))}%`;
           return (
             <div key={row.id} className="flex items-center gap-3">
               <span className="flex w-40 shrink-0 items-center gap-2 text-left text-xs font-medium text-[var(--onb-ink-muted)]">
@@ -97,16 +104,20 @@ export default function TimeSavingsStep({ stats }: TimeSavingsStepProps) {
               </span>
               <div className="relative h-8 flex-1 overflow-hidden rounded-lg bg-[var(--onb-panel)]">
                 <div
-                  className={`flex h-full items-center justify-end rounded-lg pr-3 text-xs font-semibold tabular-nums animate-[onboarding-bar-grow_800ms_cubic-bezier(0.22,1,0.36,1)_both] ${
-                    row.accent
-                      ? "bg-[var(--onb-accent)] text-[var(--onb-accent-foreground)]"
-                      : "bg-[var(--onb-key-border)] text-[var(--onb-ink)]"
+                  className={`h-full rounded-lg animate-[onboarding-bar-grow_800ms_cubic-bezier(0.22,1,0.36,1)_both] ${
+                    row.accent ? "bg-[var(--onb-accent)]" : "bg-[var(--onb-key-border)]"
                   }`}
                   style={{ width }}
-                >
-                  {t("desktop.onboarding.timeSavings.wpm", { count: row.wpm })}
-                </div>
+                />
               </div>
+              {/* The value sits beside the bar so a short bar never clips it. */}
+              <span
+                className={`w-24 shrink-0 whitespace-nowrap text-right text-xs font-semibold tabular-nums ${
+                  row.accent ? "text-[var(--onb-ink)]" : "text-[var(--onb-ink-muted)]"
+                }`}
+              >
+                {t("desktop.onboarding.timeSavings.wpm", { count: row.wpm })}
+              </span>
             </div>
           );
         })}

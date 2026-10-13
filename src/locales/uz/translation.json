@@ -2441,7 +2441,11 @@
       "conversationWillAppear": "Suhbat shu yerda ko‘rinadi...",
       "linkedEvent": "Bog‘langan tadbir",
       "noFolder": "Jildsiz",
-      "participants": "Ishtirokchilar"
+      "participants": "Ishtirokchilar",
+      "dictate": "Diktovka",
+      "dictating": "Diktovka ketmoqda",
+      "recordMeeting": "Uchrashuvni yozish",
+      "recordingMeeting": "Uchrashuv yozilmoqda"
     },
     "participants": {
       "attendee": "ishtirokchi",
@@ -2795,6 +2799,23 @@
       "stopListening": "Stop listening",
       "startListening": "Start listening",
       "hideForNow": "Hide for now"
+    },
+    "island": {
+      "dictate": "Diktovka",
+      "meetingButton": "Uchrashuv qaydlari",
+      "card": {
+        "eyebrow": "Uchrashuv qaydlari",
+        "title": "Bu uchrashuvni yozib oling",
+        "nowTitle": "{{title}} hozir davom etmoqda",
+        "upcomingTitle": "{{title}} {{minutes}} daqiqadan keyin boshlanadi",
+        "recordingTitle": "Uchrashuv qaydlari yozilmoqda",
+        "body": "Yozmasdan turib to'liq transkript, so'zlovchilar va vazifalar ro'yxatini oling.",
+        "recordingBody": "Aytilgan hamma narsa qaydingizga yozib borilmoqda.",
+        "start": "Qaydlarni boshlash",
+        "open": "Qaydlarni ochish",
+        "notNow": "Hozir emas",
+        "connectCalendar": "Kalendarni ulash"
+      }
     }
   },
   "dictationTranslation": {
@@ -3283,15 +3304,6 @@
           "other": "Boshqa"
         }
       },
-      "privacy": {
-        "title": "Ma’lumotlaringiz sizning nazoratingizda",
-        "description": "VoiceLab bu kompyuterda nimani saqlashi va nimani ulashishini o‘zingiz hal qiling.",
-        "historyTitle": "Diktovka tarixini shu qurilmada saqlash",
-        "historyDescription": "Oldingi diktovkalarni VoiceLab ichida qidirish va qayta ishlatish imkonini beradi.",
-        "usageTitle": "Anonim foydalanish ma’lumotlarini ulashish",
-        "usageDescription": "Xatolarni topish va VoiceLab’ni yaxshilashga yordam beradi. Audio yoki matningiz hech qachon yuborilmaydi.",
-        "note": "Audio VoiceLab Cloud’ga faqat matnga aylantirish uchun yuboriladi. Bularni istalgan vaqt Sozlamalarda o‘zgartirishingiz mumkin."
-      },
       "permissions": {
         "headerInProgress": "VoiceLab’ga kompyuteringizda ruxsat bering",
         "headerComplete": "Ishonchingiz uchun rahmat. Maxfiyligingiz biz uchun muhim.",
@@ -3413,81 +3425,6 @@
         "saveHours": "{{count}} soat",
         "saveSuffix": "tejashingiz mumkin!"
       },
-      "writingNeeds": {
-        "title": "Yozish bilan munosabatingiz haqida gaplashaylik.",
-        "description": "Qanday yozishingizni bilish VoiceLab sizga qayerda foydali bo‘lishini topishga yordam beradi.",
-        "options": {
-          "captureIdeas": "G‘oyalarni tez yozib olishim kerak",
-          "draftDocuments": "Hujjatlarni kamroq kuch bilan tayyorlashim kerak",
-          "manyEmails": "Ko‘p xat yozishimga to‘g‘ri keladi",
-          "manyMessages": "Ko‘p xabar yozishimga to‘g‘ri keladi",
-          "typingTiring": "Yozish charchatadi yoki noqulay",
-          "handsFree": "Qo‘lsiz yoki yo‘lda ishlashim kerak",
-          "aiPrompts": "AI uchun batafsilroq so‘rovlar yozmoqchiman",
-          "codeWithAi": "AI bilan osonroq kod yozmoqchiman"
-        }
-      },
-      "personalizeIntro": {
-        "titlePrefix": "Endi",
-        "titleAccent": "o‘zingizning",
-        "titleSuffix": "VoiceLab’ingizni sozlaymiz",
-        "description": "VoiceLab turli yozuv turlarida diktovkangizni qanday formatlashini tanlang.",
-        "appearance": "Ko‘rinish",
-        "light": "Yorug‘",
-        "dark": "Qorong‘i",
-        "system": "Tizim",
-        "later": "Keyinroq sozlash"
-      },
-      "style": {
-        "titlePrefix": "Siz",
-        "titleSuffix": "ni qanday yozasiz?",
-        "legend": "Belgilangan joylar nima o‘zgarishini ko‘rsatadi: so‘z va bosh harflar ajratilgan, tinish belgilari ko‘k rangda.",
-        "names": {
-          "casual": "Erkin",
-          "formal": "Rasmiy",
-          "excited": "Hayajonli!"
-        },
-        "hints": {
-          "casual": "Kam tinish belgisi, erkin uslub",
-          "formal": "To‘liq tinish belgilari, sayqallangan uslub",
-          "excited": "Ko‘proq undov belgilari!"
-        },
-        "personal": {
-          "subject": "shaxsiy xabarlar",
-          "description": "Bu uslubni shaxsiy xabarlarga qo‘llaymiz.",
-          "samples": {
-            "casual": "[salom] ertaga tushlikka bo‘shmisan? [soat] 12 bo‘lsa senga qulay",
-            "formal": "[Salom]{,} ertaga tushlikka bo‘shmisan? [Soat] 12 bo‘lsa senga qulay{.}"
-          }
-        },
-        "work": {
-          "subject": "ish xabarlari",
-          "description": "Bu uslubni ish xabarlariga qo‘llaymiz.",
-          "samples": {
-            "casual": "[salom] bo‘sh bo‘lsangiz ajoyib natijalar haqida gaplashaylik",
-            "formal": "[Salom]{,} bo‘sh bo‘lsangiz{,} ajoyib natijalar haqida gaplashaylik{.}",
-            "excited": "[Salom]{,} bo‘sh bo‘lsangiz{,} ajoyib natijalar haqida gaplashaylik{!}"
-          }
-        },
-        "email": {
-          "subject": "xatlar",
-          "description": "Bu uslubni xatlarga qo‘llaymiz.",
-          "samples": {
-            "casual": "[Salom] Aziz{,} bugun siz bilan suhbatlashish juda yoqimli bo‘ldi. [Keyingi] suhbatni kutaman{.}\n\nHurmat bilan,\nMalika",
-            "formal": "[Salom] Aziz{,}\n\n[Bugun] siz bilan suhbatlashish juda yoqimli bo‘ldi. [Keyingi] suhbatni kutaman{.}\n\nHurmat bilan,\nMalika",
-            "excited": "[Salom] Aziz{,}\n\n[Bugun] siz bilan suhbatlashish juda yoqimli bo‘ldi. [Keyingi] suhbatni kutaman{!}\n\nHurmat bilan,\nMalika"
-          }
-        },
-        "other": {
-          "subject": "boshqa ilovalar",
-          "description": "Bu uslubni boshqa barcha ilovalarga qo‘llaymiz.",
-          "samples": {
-            "casual": "[Hozircha] yangi mashg‘ulot rejimi [menga] yoqyapti.\n\n[Ertangi] mashg‘ulotni intiqlik bilan kutyapman ayniqsa yaxshi dam olganimdan keyin.",
-            "formal": "[Hozircha] yangi mashg‘ulot rejimi [menga] yoqmoqda.\n\n[Ertangi] mashg‘ulotni intiqlik bilan kutmoqdaman{,} ayniqsa yaxshi dam olganimdan keyin.",
-            "excited": "[Hozircha] yangi mashg‘ulot rejimi [menga] yoqyapti.\n\n[Ertangi] mashg‘ulotni intiqlik bilan kutyapman{,} ayniqsa yaxshi dam olganimdan keyin{!}"
-          }
-        }
-      },
       "finish": {
         "title": "Endi VoiceLab’ni boshqa ilovada sinab ko‘ring",
         "subtitle": "Qo‘shimcha sozlash shart emas.",
@@ -3501,6 +3438,33 @@
       },
       "ready": {
         "greeting": "Salom, {{name}}"
+      },
+      "personalize": {
+        "titlePrefix": "Siz qanday",
+        "titleAccent": "yozasiz",
+        "titleSuffix": "?",
+        "description": "VoiceLab diktovkangizni shu uslubda formatlaydi. Buni istalgan vaqt Sozlamalarda o‘zgartirishingiz mumkin.",
+        "names": {
+          "casual": "Erkin",
+          "formal": "Rasmiy",
+          "excited": "Hayajonli!"
+        },
+        "hints": {
+          "casual": "Kam tinish belgisi, erkin uslub",
+          "formal": "To‘liq tinish belgilari, sayqallangan uslub",
+          "excited": "Ko‘proq undov belgilari!"
+        },
+        "samples": {
+          "casual": "[salom] ertaga tushlikka bo‘shmisan? [soat] 12 bo‘lsa senga qulay",
+          "formal": "[Salom]{,} ertaga tushlikka bo‘shmisan? [Soat] 12 bo‘lsa senga qulay{.}",
+          "excited": "[Salom]{,} ertaga tushlikka bo‘shmisan? [Soat] 12 bo‘lsa senga qulay{!}"
+        },
+        "legend": "Belgilangan joylar nima o‘zgarishini ko‘rsatadi: so‘z va bosh harflar ajratilgan, tinish belgilari ko‘k rangda.",
+        "appearance": "Ko‘rinish",
+        "light": "Yorug‘",
+        "dark": "Qorong‘i",
+        "system": "Tizim",
+        "later": "Keyinroq sozlash"
       }
     },
     "dictionary": {

@@ -175,7 +175,6 @@ const ARRAY_SETTINGS = new Set([
   "snippets",
   "gcalAccounts",
   "onboardingUseCases",
-  "onboardingWritingNeeds",
   "translationTargets",
 ]);
 
@@ -693,7 +692,6 @@ export interface SettingsState
   setOnboardingUseCases: (useCases: string[]) => void;
   setOnboardingUseCaseNote: (note: string) => void;
   setOnboardingRole: (role: string) => void;
-  setOnboardingWritingNeeds: (needs: string[]) => void;
   setWritingStylePersonal: (style: string) => void;
   setWritingStyleWork: (style: string) => void;
   setWritingStyleEmail: (style: string) => void;
@@ -999,7 +997,6 @@ export const useSettingsStore = create<SettingsState>()((set, get) => ({
   onboardingUseCases: readStringArray("onboardingUseCases", []),
   onboardingUseCaseNote: readString("onboardingUseCaseNote", ""),
   onboardingRole: readString("onboardingRole", ""),
-  onboardingWritingNeeds: readStringArray("onboardingWritingNeeds", []),
   writingStylePersonal: readString("writingStylePersonal", ""),
   writingStyleWork: readString("writingStyleWork", ""),
   writingStyleEmail: readString("writingStyleEmail", ""),
@@ -1672,10 +1669,6 @@ export const useSettingsStore = create<SettingsState>()((set, get) => ({
 
   setOnboardingUseCaseNote: createStringSetter("onboardingUseCaseNote"),
   setOnboardingRole: createStringSetter("onboardingRole"),
-  setOnboardingWritingNeeds: (needs: string[]) => {
-    if (isBrowser) localStorage.setItem("onboardingWritingNeeds", JSON.stringify(needs));
-    set({ onboardingWritingNeeds: needs });
-  },
   setWritingStylePersonal: createStringSetter("writingStylePersonal"),
   setWritingStyleWork: createStringSetter("writingStyleWork"),
   setWritingStyleEmail: createStringSetter("writingStyleEmail"),

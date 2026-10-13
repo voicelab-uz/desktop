@@ -5,8 +5,6 @@ export interface ToastProps {
   title?: string;
   description?: string;
   action?: React.ReactNode;
-  /** Technical details (error code, request id) shown small and copyable. */
-  meta?: string;
   icon?: React.ReactNode;
   variant?: "default" | "destructive" | "success";
   duration?: number;

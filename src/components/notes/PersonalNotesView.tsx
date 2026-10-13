@@ -241,7 +241,19 @@ export default function PersonalNotesView({
     });
   }, [activeNote?.calendar_event_id]);
 
-  const startRecording = useCallback(async () => {
+  // Voice typing: the mic only, and every finished phrase lands in the note body.
+  const startDictation = useCallback(async () => {
+    const noteId = activeNoteRef.current;
+    const note = notes.find((n) => n.id === noteId);
+    await storeStartRecording({
+      noteId,
+      noteTitle: note?.title ?? null,
+      folderId: note?.folder_id ?? null,
+      mode: "dictation",
+    });
+  }, [notes]);
+
+  const startMeetingRecording = useCallback(async () => {
     const noteId = activeNoteRef.current;
     const note = notes.find((n) => n.id === noteId);
     const seedSegments = note?.transcript ? parseTranscriptSegments(note.transcript) : [];
@@ -485,8 +497,16 @@ export default function PersonalNotesView({
 
   useEffect(() => {
     if (prevTranscribingRef.current && !isTranscribing) {
-      const { transcript: realtimeTranscript, segments: realtimeSegments } =
-        useMeetingRecordingStore.getState();
+      const {
+        transcript: realtimeTranscript,
+        segments: realtimeSegments,
+        recordingMode,
+      } = useMeetingRecordingStore.getState();
+      // Dictated text already lives in the note body; it is not a transcript.
+      if (recordingMode === "dictation") {
+        prevTranscribingRef.current = isTranscribing;
+        return;
+      }
       const transcript =
         realtimeSegments.length > 0
           ? serializeTranscriptSegments(realtimeSegments)
@@ -503,8 +523,12 @@ export default function PersonalNotesView({
     if (!isTranscribing) return;
 
     const interval = setInterval(() => {
-      const { recordingNoteId: currentRecordingNoteId, segments: realtimeSegments } =
-        useMeetingRecordingStore.getState();
+      const {
+        recordingNoteId: currentRecordingNoteId,
+        segments: realtimeSegments,
+        recordingMode,
+      } = useMeetingRecordingStore.getState();
+      if (recordingMode === "dictation") return;
       if (!currentRecordingNoteId || realtimeSegments.length === 0) return;
       window.electronAPI.updateNote(currentRecordingNoteId, {
         transcript: serializeTranscriptSegments(realtimeSegments),
@@ -799,7 +823,8 @@ export default function PersonalNotesView({
               isSaving={isSaving}
               isRecording={isActiveNoteRecording}
               isProcessing={false}
-              onStartRecording={startRecording}
+              onStartRecording={startDictation}
+              onStartMeetingRecording={startMeetingRecording}
               onStopRecording={stopRecording}
               onExportNote={handleExportNote}
               onExportTranscript={handleExportTranscript}

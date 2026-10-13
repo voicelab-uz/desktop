@@ -14,6 +14,7 @@ import WelcomeGreeting from "./components/WelcomeGreeting.tsx";
 import UpdateAvailableBanner from "./components/UpdateAvailableBanner.tsx";
 import AccessibilityDropPanel from "./components/AccessibilityDropPanel.tsx";
 import { hasOnboardingProgress } from "./constants/onboarding";
+import { useOnboardingProfileSync } from "./hooks/useOnboardingProfileSync";
 
 const ControlPanel = React.lazy(() => import("./components/ControlPanel.tsx"));
 const OnboardingFlow = React.lazy(() => import("./components/OnboardingFlow.tsx"));
@@ -49,6 +50,13 @@ function MainApp() {
   const isControlPanel =
     window.location.pathname.includes("control") || window.location.search.includes("panel=true");
   const isDictationPanel = !isControlPanel;
+
+  // After onboarding, keep the account's onboarding profile in step with the
+  // settings the user changes here (and restore it on a fresh installation).
+  useOnboardingProfileSync({
+    enabled: isControlPanel && isSignedIn && !isLoading && !showOnboarding,
+    userId: user?.id ?? null,
+  });
 
   useEffect(() => {
     if (isControlPanel) {

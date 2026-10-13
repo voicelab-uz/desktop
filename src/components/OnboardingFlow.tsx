@@ -18,12 +18,12 @@ import {
   sectionIndexForStep,
   type OnboardingStep,
 } from "../constants/onboarding";
+import { applyOnboardingProfile, syncOnboardingProfile } from "../helpers/onboardingProfile";
 import { OnbButton } from "./onboarding/ui";
 import WelcomeStep from "./onboarding/WelcomeStep";
 import SignInStep from "./onboarding/SignInStep";
 import AboutYouStep from "./onboarding/AboutYouStep";
 import TypingPlacesStep from "./onboarding/TypingPlacesStep";
-import PrivacyStep from "./onboarding/PrivacyStep";
 import PermissionsStep from "./onboarding/PermissionsStep";
 import MicTestStep from "./onboarding/MicTestStep";
 import ShortcutStep from "./onboarding/ShortcutStep";
@@ -31,9 +31,7 @@ import LanguageStep from "./onboarding/LanguageStep";
 import TryItIntroStep from "./onboarding/TryItIntroStep";
 import TryItStep, { type DictationStats } from "./onboarding/TryItStep";
 import TimeSavingsStep from "./onboarding/TimeSavingsStep";
-import WritingNeedsStep from "./onboarding/WritingNeedsStep";
-import PersonalizeIntroStep from "./onboarding/PersonalizeIntroStep";
-import StyleStep from "./onboarding/StyleStep";
+import PersonalizeStep from "./onboarding/PersonalizeStep";
 import DoneStep from "./onboarding/DoneStep";
 
 interface OnboardingFlowProps {
@@ -56,7 +54,6 @@ const STEP_CONFIG: Record<OnboardingStep, StepConfig> = {
   signin: { ready: "gated" },
   "about-you": { ready: "always", skippable: true },
   "typing-places": { ready: "always", skippable: true },
-  privacy: { ready: "always" },
   permissions: { ready: "gated" },
   "mic-test": { ready: "gated", skippable: true },
   shortcut: { ready: "gated" },
@@ -66,12 +63,7 @@ const STEP_CONFIG: Record<OnboardingStep, StepConfig> = {
   "try-it-email": { ready: "gated", skippable: true },
   "try-it-list": { ready: "gated", skippable: true },
   "time-savings": { ready: "always" },
-  "writing-needs": { ready: "always", skippable: true },
-  "personalize-intro": { ready: "always", ownCta: true },
-  "style-personal": { ready: "always", skippable: true },
-  "style-work": { ready: "always", skippable: true },
-  "style-email": { ready: "always", skippable: true },
-  "style-other": { ready: "always", skippable: true },
+  personalize: { ready: "always", ownCta: true },
   finish: { ready: "gated" },
 };
 
@@ -148,6 +140,15 @@ export default function OnboardingFlow({ onComplete }: OnboardingFlowProps) {
     return () => window.clearTimeout(timer);
   }, [introPhase]);
 
+  // Chromium pauses CSS animations in hidden or occluded windows, so the mark's
+  // animationend may never fire. Never let the intro outlive its own duration.
+  useEffect(() => {
+    if (introPhase !== "mark") return undefined;
+
+    const timer = window.setTimeout(() => setIntroPhase("blank-after"), 4200);
+    return () => window.clearTimeout(timer);
+  }, [introPhase]);
+
   const go = useCallback(
     (next: OnboardingStep) => {
       const nextIndex = ONBOARDING_STEPS.indexOf(next);
@@ -178,14 +179,28 @@ export default function OnboardingFlow({ onComplete }: OnboardingFlowProps) {
     localStorage.setItem("transcriptionMode", "openwhispr");
     useSettingsStore.setState({ transcriptionMode: "openwhispr" });
     clearOnboardingProgress();
+    // The answers are stored on the account so other installations can reuse
+    // them. This never blocks finishing: a failed save is retried later.
+    void syncOnboardingProfile();
     onComplete();
   }, [isSignedIn, onComplete]);
 
-  // Signing in finishes the account step on its own.
+  // Signing in finishes the account step on its own. Answers saved from an
+  // earlier installation prefill the next steps; local choices are kept.
   useEffect(() => {
     if (step !== "signin" || !isSignedIn) return undefined;
+    let cancelled = false;
+    void window.electronAPI
+      ?.desktopOnboardingGet?.()
+      .then((profile) => {
+        if (!cancelled && profile) applyOnboardingProfile(profile);
+      })
+      .catch(() => {});
     const timer = window.setTimeout(goNext, 1100);
-    return () => window.clearTimeout(timer);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
   }, [goNext, isSignedIn, step]);
 
   const handleHotkeyChange = useCallback(
@@ -257,8 +272,6 @@ export default function OnboardingFlow({ onComplete }: OnboardingFlowProps) {
         return <AboutYouStep />;
       case "typing-places":
         return <TypingPlacesStep />;
-      case "privacy":
-        return <PrivacyStep />;
       case "permissions":
         return (
           <PermissionsStep
@@ -302,15 +315,8 @@ export default function OnboardingFlow({ onComplete }: OnboardingFlowProps) {
         );
       case "time-savings":
         return <TimeSavingsStep stats={dictationStats} />;
-      case "writing-needs":
-        return <WritingNeedsStep />;
-      case "personalize-intro":
-        return <PersonalizeIntroStep onContinue={goNext} onLater={() => go("finish")} />;
-      case "style-personal":
-      case "style-work":
-      case "style-email":
-      case "style-other":
-        return <StyleStep key={step} context={step.replace("style-", "") as never} />;
+      case "personalize":
+        return <PersonalizeStep onContinue={goNext} onLater={() => go("finish")} />;
       case "finish":
         return <DoneStep isSignedIn={isSignedIn} hotkey={hotkey} activationMode={activationMode} />;
       default:

@@ -691,6 +691,7 @@ class DatabaseManager {
       this.db.exec(
         "CREATE UNIQUE INDEX IF NOT EXISTS idx_folders_client_folder_id ON folders(client_folder_id)"
       );
+      this._migrateFoldersToAccountScope();
       this.db.exec(
         "CREATE UNIQUE INDEX IF NOT EXISTS idx_conversations_client_id ON agent_conversations(client_conversation_id)"
       );
@@ -2037,14 +2038,78 @@ class DatabaseManager {
     }
   }
 
+  // user_version 2: a person's own folders belong to their account profile, like
+  // their notes. Default folders (Personal, Meetings, Videos) stay shared on the
+  // device. Folder names were globally unique before; now they are unique per
+  // profile, which needs the table rebuilt (SQLite cannot drop a constraint).
+  _migrateFoldersToAccountScope() {
+    if (this.db.pragma("user_version", { simple: true }) >= 2) return;
+    // Foreign keys must be off for the rebuild; this cannot run inside a transaction.
+    this.db.pragma("foreign_keys = OFF");
+    try {
+      this.db.transaction(() => {
+        this.db.exec(`
+          CREATE TABLE folders_v2 (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT NOT NULL,
+            is_default INTEGER NOT NULL DEFAULT 0,
+            sort_order INTEGER NOT NULL DEFAULT 0,
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            client_folder_id TEXT,
+            cloud_id TEXT,
+            sync_status TEXT DEFAULT 'pending',
+            deleted_at TEXT,
+            privacy_scope_id TEXT NOT NULL DEFAULT 'device-local'
+          );
+          INSERT INTO folders_v2
+            (id, name, is_default, sort_order, created_at, updated_at, client_folder_id, cloud_id, sync_status, deleted_at, privacy_scope_id)
+          SELECT id, name, is_default, sort_order, created_at, updated_at, client_folder_id, cloud_id, sync_status, deleted_at,
+            CASE WHEN is_default = 1 THEN 'device-local'
+              ELSE COALESCE(
+                (SELECT n.privacy_scope_id FROM notes n
+                  WHERE n.folder_id = folders.id AND n.deleted_at IS NULL
+                  ORDER BY n.id DESC LIMIT 1),
+                'device-local')
+            END
+          FROM folders;
+          DROP TABLE folders;
+          ALTER TABLE folders_v2 RENAME TO folders;
+          CREATE UNIQUE INDEX IF NOT EXISTS idx_folders_client_folder_id ON folders(client_folder_id);
+          CREATE UNIQUE INDEX IF NOT EXISTS idx_folders_scope_name ON folders(privacy_scope_id, name);
+          -- A shared folder could hold notes from several profiles. The folder
+          -- now belongs to one of them; the others' notes move to Personal so
+          -- they stay reachable instead of sitting in a folder they cannot see.
+          UPDATE notes SET folder_id = (SELECT id FROM folders WHERE name = 'Personal' AND is_default = 1)
+            WHERE folder_id IN (SELECT id FROM folders WHERE is_default = 0)
+              AND privacy_scope_id != (SELECT privacy_scope_id FROM folders WHERE folders.id = notes.folder_id);
+        `);
+        const violations = this.db.pragma("foreign_key_check");
+        if (violations.length > 0) {
+          throw new Error(`folder migration broke ${violations.length} note references`);
+        }
+        this.db.pragma("user_version = 2");
+      })();
+    } finally {
+      this.db.pragma("foreign_keys = ON");
+    }
+  }
+
+  // A folder is visible when it is a shared default or belongs to the active profile.
+  _visibleFolder(id) {
+    return this.db
+      .prepare("SELECT * FROM folders WHERE id = ? AND (is_default = 1 OR privacy_scope_id = ?)")
+      .get(id, this._activePrivacyScope());
+  }
+
   getFolders() {
     try {
       if (!this.db) throw new Error("Database not initialized");
       return this.db
         .prepare(
-          "SELECT * FROM folders WHERE deleted_at IS NULL ORDER BY sort_order ASC, created_at ASC"
+          "SELECT * FROM folders WHERE deleted_at IS NULL AND (is_default = 1 OR privacy_scope_id = ?) ORDER BY sort_order ASC, created_at ASC"
         )
-        .all();
+        .all(this._activePrivacyScope());
     } catch (error) {
       debugLogger.error("Error getting folders", { error: error.message }, "notes");
       throw error;
@@ -2056,14 +2121,21 @@ class DatabaseManager {
       if (!this.db) throw new Error("Database not initialized");
       const trimmed = (name || "").trim();
       if (!trimmed) return { success: false, error: "Folder name is required" };
-      const existing = this.db.prepare("SELECT id FROM folders WHERE name = ?").get(trimmed);
+      const scope = this._activePrivacyScope();
+      const existing = this.db
+        .prepare(
+          "SELECT id FROM folders WHERE name = ? AND deleted_at IS NULL AND (is_default = 1 OR privacy_scope_id = ?)"
+        )
+        .get(trimmed, scope);
       if (existing) return { success: false, error: "A folder with that name already exists" };
       const maxOrder = this.db.prepare("SELECT MAX(sort_order) as max_order FROM folders").get();
       const sortOrder = (maxOrder?.max_order ?? 0) + 1;
       const clientFolderId = randomUUID();
       const result = this.db
-        .prepare("INSERT INTO folders (name, sort_order, client_folder_id) VALUES (?, ?, ?)")
-        .run(trimmed, sortOrder, clientFolderId);
+        .prepare(
+          "INSERT INTO folders (name, sort_order, client_folder_id, privacy_scope_id) VALUES (?, ?, ?, ?)"
+        )
+        .run(trimmed, sortOrder, clientFolderId, scope);
       const folder = this.db
         .prepare("SELECT * FROM folders WHERE id = ?")
         .get(result.lastInsertRowid);
@@ -2077,7 +2149,7 @@ class DatabaseManager {
   deleteFolder(id) {
     try {
       if (!this.db) throw new Error("Database not initialized");
-      const folder = this.db.prepare("SELECT * FROM folders WHERE id = ?").get(id);
+      const folder = this._visibleFolder(id);
       if (!folder) return { success: false, error: "Folder not found" };
       if (folder.is_default) return { success: false, error: "Cannot delete default folders" };
       // Folders are device-level. Never cascade into another account's hidden notes.
@@ -2116,14 +2188,16 @@ class DatabaseManager {
   renameFolder(id, name) {
     try {
       if (!this.db) throw new Error("Database not initialized");
-      const folder = this.db.prepare("SELECT * FROM folders WHERE id = ?").get(id);
+      const folder = this._visibleFolder(id);
       if (!folder) return { success: false, error: "Folder not found" };
       if (folder.is_default) return { success: false, error: "Cannot rename default folders" };
       const trimmed = (name || "").trim();
       if (!trimmed) return { success: false, error: "Folder name is required" };
       const existing = this.db
-        .prepare("SELECT id FROM folders WHERE name = ? AND id != ?")
-        .get(trimmed, id);
+        .prepare(
+          "SELECT id FROM folders WHERE name = ? AND id != ? AND deleted_at IS NULL AND (is_default = 1 OR privacy_scope_id = ?)"
+        )
+        .get(trimmed, id, this._activePrivacyScope());
       if (existing) return { success: false, error: "A folder with that name already exists" };
       this.db
         .prepare(
@@ -3577,8 +3651,10 @@ class DatabaseManager {
     try {
       if (!this.db) throw new Error("Database not initialized");
       return this.db
-        .prepare("SELECT * FROM folders WHERE sync_status = 'pending' AND deleted_at IS NULL")
-        .all();
+        .prepare(
+          "SELECT * FROM folders WHERE sync_status = 'pending' AND deleted_at IS NULL AND (is_default = 1 OR privacy_scope_id = ?)"
+        )
+        .all(this._activePrivacyScope());
     } catch (error) {
       debugLogger.error("Error getting pending folders", { error: error.message }, "database");
       throw error;
@@ -3590,9 +3666,9 @@ class DatabaseManager {
       if (!this.db) throw new Error("Database not initialized");
       return this.db
         .prepare(
-          "SELECT * FROM folders WHERE deleted_at IS NOT NULL AND cloud_id IS NOT NULL AND sync_status = 'pending'"
+          "SELECT * FROM folders WHERE deleted_at IS NOT NULL AND cloud_id IS NOT NULL AND sync_status = 'pending' AND (is_default = 1 OR privacy_scope_id = ?)"
         )
-        .all();
+        .all(this._activePrivacyScope());
     } catch (error) {
       debugLogger.error(
         "Error getting pending folder deletes",
@@ -3639,8 +3715,8 @@ class DatabaseManager {
     try {
       if (!this.db) throw new Error("Database not initialized");
       const stmt = this.db.prepare(`
-        INSERT INTO folders (client_folder_id, cloud_id, name, is_default, sort_order, sync_status, created_at, updated_at)
-        VALUES (?, ?, ?, ?, ?, 'synced', ?, ?)
+        INSERT INTO folders (client_folder_id, cloud_id, name, is_default, sort_order, sync_status, created_at, updated_at, privacy_scope_id)
+        VALUES (?, ?, ?, ?, ?, 'synced', ?, ?, ?)
         ON CONFLICT(client_folder_id) DO UPDATE SET
           cloud_id = excluded.cloud_id,
           name = excluded.name,
@@ -3655,7 +3731,8 @@ class DatabaseManager {
         cloudFolder.is_default ? 1 : 0,
         cloudFolder.sort_order || 0,
         cloudFolder.created_at,
-        cloudFolder.updated_at || cloudFolder.created_at
+        cloudFolder.updated_at || cloudFolder.created_at,
+        this._activePrivacyScope()
       );
       return this.db
         .prepare("SELECT * FROM folders WHERE client_folder_id = ?")
@@ -3697,7 +3774,11 @@ class DatabaseManager {
   getFolderIdMap() {
     try {
       if (!this.db) throw new Error("Database not initialized");
-      return this.db.prepare("SELECT * FROM folders WHERE deleted_at IS NULL").all();
+      return this.db
+        .prepare(
+          "SELECT * FROM folders WHERE deleted_at IS NULL AND (is_default = 1 OR privacy_scope_id = ?)"
+        )
+        .all(this._activePrivacyScope());
     } catch (error) {
       debugLogger.error("Error getting folder id map", { error: error.message }, "database");
       throw error;

@@ -2,31 +2,41 @@
 import React, { useState, useEffect, useLayoutEffect, useRef } from "react";
 import { useTranslation } from "react-i18next";
 import "./index.css";
-import { Minus, X } from "lucide-react";
+import { Minus, NotebookPen, X } from "lucide-react";
 import { useToast } from "./components/ui/useToast";
 import { NoticeContent } from "./components/ui/Toast";
+import MeetingIslandCard from "./components/ui/MeetingIslandCard";
+import { formatHotkeyLabel } from "./utils/hotkeys";
 import { useWindowDrag } from "./hooks/useWindowDrag";
 import { useAudioRecording } from "./hooks/useAudioRecording";
 import { useSettingsStore } from "./stores/settingsStore";
 
 const AUDIO_BAR_SHAPE = [0.5, 0.1, 0.9, 0.3, 0.6, 0.7, 0.2, 0.4];
 
+// Idle: a flat line. Recording: bars rise with the microphone level and sway
+// so the island visibly "listens". Processing: a slow pulse.
 const AudioLevelBars = ({ audioLevel, active = false, processing = false }) => {
   const level = Math.min(1, Math.max(0, Number(audioLevel) || 0));
+  // Perceptual curve: quiet speech still moves the bars; loud speech levels
+  // off instead of slamming to the ceiling.
+  const drive = Math.pow(level, 0.7);
+  const mode = active ? "active" : processing ? "processing" : "idle";
 
   return (
     <span
-      className={`voice-level-bars${processing ? " voice-level-bars--processing" : ""}`}
+      className={`voice-level-bars voice-level-bars--${mode}`}
       aria-label="Microphone input level"
       role="img"
     >
       {AUDIO_BAR_SHAPE.map((shape, index) => {
+        // Low ceiling: even a loud voice stays a slim ripple inside the pill
+        // (max 14 px of the 44 px pill), with the centre bars reaching highest.
         const height = active
-          ? 4 + Math.round(level * (7 + shape * 16))
+          ? Math.min(14, 2 + Math.round(drive * (4 + shape * 10)))
           : processing
-            ? 6 + Math.round(shape * 9)
-            : 5 + Math.round(shape * 5);
-        const opacity = active ? 0.42 + level * 0.58 : processing ? 0.64 : 0.42;
+            ? 4 + Math.round(shape * 6)
+            : 2;
+        const opacity = active ? 0.55 + drive * 0.45 : processing ? 0.64 : 0.55;
 
         return (
           <span
@@ -63,12 +73,17 @@ const FloatingVoiceIsland = ({ state, audioLevel }) => {
 export default function App() {
   const [isHovered, setIsHovered] = useState(false);
   const [isCommandMenuOpen, setIsCommandMenuOpen] = useState(false);
+  // The meeting-notes card the pill morphs into, and what it knows about the
+  // current meeting state (recording, calendar, next event).
+  const [meetingCardOpen, setMeetingCardOpen] = useState(false);
+  const [meetingState, setMeetingState] = useState(null);
   const commandMenuRef = useRef(null);
   const buttonRef = useRef(null);
   const { toast, dismiss, toastCount, toasts, pauseTimer, resumeTimer } = useToast();
   // The newest notice morphs the dictation control into a wide card.
   const notice = toasts.length > 0 ? toasts[toasts.length - 1] : null;
   const noticeExpanded = Boolean(notice) && !notice.isExiting;
+  const panelExpanded = noticeExpanded || meetingCardOpen;
   const noticeRef = useRef(null);
   const [noticeHeight, setNoticeHeight] = useState(0);
   useLayoutEffect(() => {
@@ -79,7 +94,7 @@ export default function App() {
     const observer = new ResizeObserver(measure);
     observer.observe(element);
     return () => observer.disconnect();
-  }, [notice?.id]);
+  }, [notice?.id, meetingCardOpen]);
   const { t } = useTranslation();
   const { isDragging, handleMouseDown, handleMouseUp } = useWindowDrag();
 
@@ -89,6 +104,8 @@ export default function App() {
   // Floating icon auto-hide setting (read from store, synced via IPC)
   const floatingIconAutoHide = useSettingsStore((s) => s.floatingIconAutoHide);
   const panelStartPosition = useSettingsStore((s) => s.panelStartPosition);
+  const dictationKey = useSettingsStore((s) => s.dictationKey);
+  const hotkeyLabel = formatHotkeyLabel(dictationKey);
   const prevAutoHideRef = useRef(floatingIconAutoHide);
 
   const setWindowInteractivity = React.useCallback((shouldCapture) => {
@@ -176,12 +193,43 @@ export default function App() {
   }, [toast, dismiss, t]);
 
   useEffect(() => {
-    if (isCommandMenuOpen || toastCount > 0) {
+    if (isCommandMenuOpen || toastCount > 0 || meetingCardOpen) {
       setWindowInteractivity(true);
     } else if (!isHovered) {
       setWindowInteractivity(false);
     }
-  }, [isCommandMenuOpen, isHovered, toastCount, setWindowInteractivity]);
+  }, [isCommandMenuOpen, isHovered, toastCount, meetingCardOpen, setWindowInteractivity]);
+
+  const refreshMeetingState = React.useCallback(async () => {
+    try {
+      const state = await window.electronAPI?.islandGetMeetingState?.();
+      if (state) setMeetingState(state);
+    } catch {
+      // The card still works without calendar context.
+    }
+  }, []);
+
+  const openMeetingCard = React.useCallback(() => {
+    setIsCommandMenuOpen(false);
+    setWindowInteractivity(true);
+    setMeetingCardOpen(true);
+    void refreshMeetingState();
+  }, [refreshMeetingState, setWindowInteractivity]);
+
+  const closeMeetingCard = React.useCallback(() => {
+    setMeetingCardOpen(false);
+  }, []);
+
+  // Card actions hand over to the control panel; the card closes first so the
+  // island is back to its pill by the time the other window appears.
+  const runIslandAction = React.useCallback(async (invoke) => {
+    setMeetingCardOpen(false);
+    try {
+      await invoke?.();
+    } catch {
+      // Navigation failures are not actionable from the island.
+    }
+  }, []);
 
   const handleDictationToggle = React.useCallback(() => {
     setIsCommandMenuOpen(false);
@@ -201,17 +249,21 @@ export default function App() {
     onToggle: handleDictationToggle,
   });
 
+  // Hovering the idle pill reveals the meeting-notes action and the shortcut
+  // label inside the window's fixed bounds; nothing resizes on hover.
+  const showHoverActions = isHovered && !isRecording && !isProcessing && !isDragging;
+
   useEffect(() => {
     if (isCommandMenuOpen && toastCount > 0) {
       window.electronAPI?.resizeMainWindow?.("EXPANDED");
     } else if (isCommandMenuOpen) {
       window.electronAPI?.resizeMainWindow?.("WITH_MENU");
-    } else if (toastCount > 0) {
+    } else if (toastCount > 0 || meetingCardOpen) {
       window.electronAPI?.resizeMainWindow?.("WITH_TOAST");
     } else {
       window.electronAPI?.resizeMainWindow?.("BASE");
     }
-  }, [isCommandMenuOpen, toastCount]);
+  }, [isCommandMenuOpen, toastCount, meetingCardOpen]);
 
   const captureTargetThenToggle = React.useCallback(async () => {
     try {
@@ -288,7 +340,9 @@ export default function App() {
   useEffect(() => {
     const handleKeyPress = (e) => {
       if (e.key === "Escape") {
-        if (isCommandMenuOpen) {
+        if (meetingCardOpen) {
+          setMeetingCardOpen(false);
+        } else if (isCommandMenuOpen) {
           setIsCommandMenuOpen(false);
         } else {
           handleClose();
@@ -298,7 +352,7 @@ export default function App() {
 
     document.addEventListener("keydown", handleKeyPress);
     return () => document.removeEventListener("keydown", handleKeyPress);
-  }, [isCommandMenuOpen]);
+  }, [isCommandMenuOpen, meetingCardOpen]);
 
   // Determine current mic state
   const getMicState = () => {
@@ -348,14 +402,39 @@ export default function App() {
           onMouseEnter={() => {
             setIsHovered(true);
             setWindowInteractivity(true);
+            void refreshMeetingState();
           }}
           onMouseLeave={() => {
             setIsHovered(false);
-            if (!isCommandMenuOpen) {
+            if (!isCommandMenuOpen && !meetingCardOpen) {
               setWindowInteractivity(false);
             }
           }}
         >
+          {showHoverActions && !isCommandMenuOpen && !panelExpanded && (
+            <>
+              <span className="voice-island-tip" aria-hidden="true">
+                {t("app.island.dictate")}
+                <span className="voice-island-tip__key">{hotkeyLabel}</span>
+              </span>
+              <button
+                type="button"
+                className="voice-island-action"
+                data-recording={meetingState?.recording ? "true" : "false"}
+                aria-label={t("app.island.meetingButton")}
+                title={t("app.island.meetingButton")}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  openMeetingCard();
+                }}
+              >
+                <NotebookPen size={18} strokeWidth={2} aria-hidden="true" />
+                {meetingState?.recording && (
+                  <span className="voice-island-action__dot" aria-hidden="true" />
+                )}
+              </button>
+            </>
+          )}
           {(isRecording || isProcessing) && isHovered && (
             <button
               aria-label={
@@ -376,26 +455,38 @@ export default function App() {
           )}
           <div
             className="voice-morph"
-            data-expanded={noticeExpanded ? "true" : "false"}
+            data-expanded={panelExpanded ? "true" : "false"}
             style={
-              noticeExpanded
+              panelExpanded
                 ? { width: NOTICE_WIDTH, height: Math.max(noticeHeight, ISLAND_HEIGHT) }
                 : { width: ISLAND_WIDTH, height: ISLAND_HEIGHT }
             }
           >
-            {notice && (
+            {(notice || meetingCardOpen) && (
               <div
                 ref={noticeRef}
                 className="voice-morph__notice"
                 style={{ width: NOTICE_WIDTH }}
-                aria-hidden={!noticeExpanded}
+                aria-hidden={!panelExpanded}
               >
-                <NoticeContent
-                  {...notice}
-                  onClose={() => dismiss(notice.id)}
-                  onPauseTimer={() => pauseTimer(notice.id)}
-                  onResumeTimer={(remaining) => resumeTimer(notice.id, remaining)}
-                />
+                {notice ? (
+                  <NoticeContent
+                    {...notice}
+                    onClose={() => dismiss(notice.id)}
+                    onPauseTimer={() => pauseTimer(notice.id)}
+                    onResumeTimer={(remaining) => resumeTimer(notice.id, remaining)}
+                  />
+                ) : (
+                  <MeetingIslandCard
+                    state={meetingState}
+                    onStart={() => runIslandAction(window.electronAPI?.islandStartMeeting)}
+                    onOpen={() => runIslandAction(window.electronAPI?.islandOpenNotes)}
+                    onConnectCalendar={() =>
+                      runIslandAction(window.electronAPI?.islandOpenIntegrations)
+                    }
+                    onClose={closeMeetingCard}
+                  />
+                )}
               </div>
             )}
             <button

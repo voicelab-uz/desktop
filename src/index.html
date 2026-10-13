@@ -2,9 +2,11 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
+    <!-- blob: in script-src is required for the AudioWorklet modules the app
+         generates for meeting and dictation capture; inline scripts stay blocked. -->
     <meta
       http-equiv="Content-Security-Policy"
-      content="default-src 'none'; base-uri 'none'; object-src 'none'; frame-src 'none'; frame-ancestors 'none'; form-action 'none'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; font-src 'self' data:; img-src 'self' data: blob: https:; media-src 'self' blob: file: https:; connect-src 'self' blob: http://localhost:5183 ws://localhost:5183 https://api.voicelab.uz https://voicelab.uz https://api.openai.com https://api.anthropic.com https://generativelanguage.googleapis.com https://api.groq.com https://openrouter.ai https://api.x.ai https://api.mistral.ai https://api.corti.app https://api.eu.corti.app https://api.tinfoil.sh;"
+      content="default-src 'none'; base-uri 'none'; object-src 'none'; frame-src 'none'; frame-ancestors 'none'; form-action 'none'; script-src 'self' blob: 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; font-src 'self' data:; img-src 'self' data: blob: https:; media-src 'self' blob: file: https:; connect-src 'self' blob: http://localhost:5183 ws://localhost:5183 https://api.voicelab.uz https://voicelab.uz https://api.openai.com https://api.anthropic.com https://generativelanguage.googleapis.com https://api.groq.com https://openrouter.ai https://api.x.ai https://api.mistral.ai https://api.corti.app https://api.eu.corti.app https://api.tinfoil.sh;"
     />
     <link rel="icon" type="image/png" href="./assets/icon.png" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />

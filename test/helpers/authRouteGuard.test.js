@@ -178,7 +178,7 @@ test("onboarding navigation actions keep one consistent footprint", () => {
 
 test("onboarding personalizes interface language and appearance without the settings context", () => {
   const onboarding = read("src/components/OnboardingFlow.tsx");
-  const personalize = read("src/components/onboarding/PersonalizeIntroStep.tsx");
+  const personalize = read("src/components/onboarding/PersonalizeStep.tsx");
 
   assert.match(onboarding, /UI_LANGUAGES/);
   assert.match(onboarding, /value: "uz"/);

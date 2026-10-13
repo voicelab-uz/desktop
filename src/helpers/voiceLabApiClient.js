@@ -22,6 +22,7 @@ const DESKTOP_STT_PATH = ["", "v1", "desktop", "stt"].join("/");
 const DESKTOP_USAGE_PATH = ["", "v1", "desktop", "usage"].join("/");
 const DESKTOP_PROFILE_PATH = ["", "v1", "desktop", "me"].join("/");
 const DESKTOP_TRANSCRIPTIONS_PATH = ["", "v1", "desktop", "transcriptions"].join("/");
+const DESKTOP_ONBOARDING_PATH = ["", "v1", "desktop", "onboarding"].join("/");
 const PROFILE_CACHE_TTL_MS = 20 * 60 * 1000;
 const MAX_JSON_RESPONSE_BYTES = 1024 * 1024;
 const REQUEST_ID_PATTERN = /^req_[A-Za-z0-9_-]{1,256}$/;
@@ -72,6 +73,8 @@ function normalizeErrorCode(status, body) {
     DESKTOP_TRANSCRIPT_CONFLICT: "DESKTOP_TRANSCRIPT_CONFLICT",
     DESKTOP_TRANSCRIPTION_NOT_FOUND: "DESKTOP_TRANSCRIPTION_NOT_FOUND",
     DESKTOP_TRANSCRIPTIONS_UNAVAILABLE: "DESKTOP_TRANSCRIPTIONS_UNAVAILABLE",
+    DESKTOP_ONBOARDING_NOT_FOUND: "DESKTOP_ONBOARDING_NOT_FOUND",
+    DESKTOP_ONBOARDING_UNAVAILABLE: "SERVICE_UNAVAILABLE",
   }[serverCode];
   if (goCode) return goCode;
   if (serverCode.startsWith("SYNC_")) return serverCode;
@@ -248,6 +251,102 @@ function invalidResponse(resource, requestId = null) {
 
 function safeInteger(value, { min = 0, max = Number.MAX_SAFE_INTEGER } = {}) {
   return Number.isSafeInteger(value) && value >= min && value <= max ? value : null;
+}
+
+// Mirrors the closed option sets the server accepts for desktop onboarding.
+// Unknown values are dropped on read so the renderer only ever sees choices it
+// can render.
+const ONBOARDING_ROLES = new Set([
+  "developer",
+  "founder",
+  "product",
+  "marketing",
+  "sales",
+  "operations",
+  "student",
+  "educator",
+  "writer",
+  "creator",
+  "consultant",
+  "legal",
+  "healthcare",
+  "support",
+  "other",
+]);
+const ONBOARDING_USE_CASES = new Set([
+  "messages",
+  "emails",
+  "documents",
+  "notes",
+  "ai",
+  "coding",
+  "posts",
+  "other",
+]);
+const ONBOARDING_WRITING_STYLES = new Set(["casual", "formal", "excited"]);
+const ONBOARDING_THEMES = new Set(["light", "dark", "auto"]);
+const ONBOARDING_MAX_USE_CASES = 16;
+
+function onboardingChoice(value, allowed) {
+  return typeof value === "string" && allowed.has(value) ? value : "";
+}
+
+function onboardingText(value, maxLength) {
+  return typeof value === "string" ? value.trim().toLowerCase().slice(0, maxLength) : "";
+}
+
+function normalizeDesktopOnboarding(payload) {
+  const root = record(payload);
+  const onboarding = record(root.onboarding);
+  const requestId = safeRequestId(root.request_id);
+  const revision = safeInteger(onboarding.revision, { min: 1 });
+  const completedAt = validRfc3339(onboarding.completed_at);
+  const updatedAt = validRfc3339(onboarding.updated_at);
+  if (!requestId || revision == null || !completedAt || !updatedAt) {
+    return invalidResponse("desktop onboarding", requestId);
+  }
+  const useCases = Array.isArray(onboarding.use_cases)
+    ? [...new Set(onboarding.use_cases.filter((value) => ONBOARDING_USE_CASES.has(value)))]
+    : [];
+  const dictationLanguage = onboardingText(onboarding.dictation_language, 16);
+  return {
+    role: onboardingChoice(onboarding.role, ONBOARDING_ROLES),
+    useCases,
+    dictationLanguage: /^[a-z]{2,3}$/.test(dictationLanguage) ? dictationLanguage : "auto",
+    writingStyle: onboardingChoice(onboarding.writing_style, ONBOARDING_WRITING_STYLES),
+    uiLanguage: onboardingText(onboarding.ui_language, 16),
+    theme: onboardingChoice(onboarding.theme, ONBOARDING_THEMES),
+    appVersion: safeProfileText(onboarding.app_version, 32) || "",
+    platform: onboardingText(onboarding.platform, 16),
+    revision,
+    completedAt,
+    updatedAt,
+    requestId,
+  };
+}
+
+// Builds the exact JSON body for PUT /v1/desktop/onboarding. Empty strings mean
+// the user skipped a question; the server stores them as skipped rather than
+// inventing an answer.
+function desktopOnboardingPayload(input, appVersion) {
+  const source = record(input);
+  const useCases = Array.isArray(source.useCases)
+    ? [...new Set(source.useCases.map((value) => onboardingText(value, 32)).filter(Boolean))].slice(
+        0,
+        ONBOARDING_MAX_USE_CASES
+      )
+    : [];
+  return {
+    role: onboardingText(source.role, 32),
+    use_cases: useCases,
+    dictation_language: onboardingText(source.dictationLanguage, 16) || "auto",
+    writing_style: onboardingText(source.writingStyle, 16),
+    ui_language: onboardingText(source.uiLanguage, 16),
+    theme: onboardingText(source.theme, 16),
+    app_version: typeof appVersion === "string" ? appVersion.trim().slice(0, 32) : "",
+    platform: process.platform,
+    completed_at: validRfc3339(source.completedAt) || new Date().toISOString(),
+  };
 }
 
 function normalizeUsage(payload) {
@@ -558,8 +657,13 @@ class VoiceLabApiClient {
     const isDesktopTranscriptions =
       routePath === DESKTOP_TRANSCRIPTIONS_PATH ||
       routePath.startsWith(`${DESKTOP_TRANSCRIPTIONS_PATH}/`);
+    const isDesktopOnboarding = routePath === DESKTOP_ONBOARDING_PATH;
     const isCanonicalDesktopBoundary =
-      isDesktopStt || isDesktopUsage || isDesktopProfile || isDesktopTranscriptions;
+      isDesktopStt ||
+      isDesktopUsage ||
+      isDesktopProfile ||
+      isDesktopTranscriptions ||
+      isDesktopOnboarding;
     if (isDesktopStt && options.idempotencyKey) {
       throw new VoiceLabApiError({
         code: "INVALID_REQUEST",
@@ -691,7 +795,7 @@ class VoiceLabApiClient {
       const serverAuthCode = body?.error?.code || body?.code || null;
       const refreshableDesktopToken =
         response.status === 401 &&
-        (isDesktopStt || isDesktopUsage || isDesktopProfile || isDesktopTranscriptions) &&
+        isCanonicalDesktopBoundary &&
         serverAuthCode === "invalid_desktop_token";
       if (refreshableDesktopToken && !authRetried) {
         if (!sameAuthSessionContext(initialAuthContext, authSessionContext(this.authManager))) {
@@ -933,6 +1037,58 @@ class VoiceLabApiClient {
     };
   }
 
+  // Returns the account's saved onboarding answers, or null when the user has
+  // never finished desktop onboarding on any installation.
+  async getDesktopOnboarding() {
+    const requestContext = authSessionContext(this.authManager);
+    let body;
+    try {
+      body = await this.authenticatedFetch(DESKTOP_ONBOARDING_PATH, {
+        method: "GET",
+        timeoutMs: 15_000,
+        cache: "no-store",
+      });
+    } catch (error) {
+      if (
+        error instanceof VoiceLabApiError &&
+        error.status === 404 &&
+        error.code === "DESKTOP_ONBOARDING_NOT_FOUND"
+      ) {
+        return null;
+      }
+      throw error;
+    }
+    if (!sameAuthSessionContext(requestContext, authSessionContext(this.authManager))) {
+      throw new VoiceLabApiError({
+        code: "AUTH_ACCOUNT_CHANGED",
+        message: "The active VoiceLab session changed during this request.",
+        status: 409,
+      });
+    }
+    return normalizeDesktopOnboarding(body);
+  }
+
+  // Upserts the onboarding answers. Safe to repeat: the server replaces the
+  // profile in place and only bumps its revision.
+  async saveDesktopOnboarding(input = {}) {
+    const requestContext = authSessionContext(this.authManager);
+    const body = await this.authenticatedFetch(DESKTOP_ONBOARDING_PATH, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(desktopOnboardingPayload(input, this.appVersion)),
+      timeoutMs: 20_000,
+      cache: "no-store",
+    });
+    if (!sameAuthSessionContext(requestContext, authSessionContext(this.authManager))) {
+      throw new VoiceLabApiError({
+        code: "AUTH_ACCOUNT_CHANGED",
+        message: "The active VoiceLab session changed during this request.",
+        status: 409,
+      });
+    }
+    return normalizeDesktopOnboarding(body);
+  }
+
   async beginDictation({ audioBuffer, source = "dictate", durationMs = null, language = null }) {
     const requestedLanguage =
       (typeof language === "string" ? language.trim().toLowerCase() : "") || "auto";
@@ -1047,6 +1203,8 @@ class VoiceLabApiClient {
         `audio.${canonicalExtension}`
       );
       if (language) form.append("language", language);
+      // Meeting segments are metered but never kept in the dictation history.
+      if (metadata.purpose === "meeting") form.append("purpose", "meeting");
       return form;
     };
     const result = await this.authenticatedFetch("/v1/desktop/stt", {

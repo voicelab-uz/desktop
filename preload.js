@@ -300,6 +300,10 @@ const fullElectronAPI = {
   setNotificationInteractivity: (interactive) =>
     ipcRenderer.invoke("set-notification-interactivity", interactive),
   resizeMainWindow: (sizeKey) => ipcRenderer.invoke("resize-main-window", sizeKey),
+  islandGetMeetingState: () => ipcRenderer.invoke("island-meeting-state"),
+  islandStartMeeting: () => ipcRenderer.invoke("island-start-meeting"),
+  islandOpenNotes: () => ipcRenderer.invoke("island-open-notes"),
+  islandOpenIntegrations: () => ipcRenderer.invoke("island-open-integrations"),
   getRecordingIslandSupport: () => ipcRenderer.invoke("get-recording-island-support"),
 
   // Update functions
@@ -451,6 +455,8 @@ const fullElectronAPI = {
   authCancelBrowser: () => ipcRenderer.invoke("auth-cancel-browser"),
   authGetStatus: () => ipcRenderer.invoke("auth-get-status"),
   authGetProfile: () => ipcRenderer.invoke("auth-get-profile"),
+  desktopOnboardingGet: () => ipcRenderer.invoke("desktop-onboarding-get"),
+  desktopOnboardingSave: (profile) => ipcRenderer.invoke("desktop-onboarding-save", profile),
   authRefreshSession: () => ipcRenderer.invoke("auth-refresh-session"),
   authLogout: () => ipcRenderer.invoke("auth-logout"),
   authDeleteAccount: () => ipcRenderer.invoke("auth-delete-account"),
@@ -528,6 +534,10 @@ const fullElectronAPI = {
     "meeting-transcription-error",
     (callback) => (_event, data) => callback(data)
   ),
+  onMeetingTranscriptionHalted: registerListener(
+    "meeting-transcription-halted",
+    (callback) => (_event, data) => callback(data)
+  ),
 
   // Usage limit events (for showing UpgradePrompt in ControlPanel)
   notifyLimitReached: (data) => ipcRenderer.send("limit-reached", data),
@@ -580,6 +590,7 @@ const fullElectronAPI = {
 
   // Settings shortcut (Cmd+, / Ctrl+,)
   onShowSettings: registerListener("show-settings", (callback) => () => callback()),
+  onShowIntegrations: registerListener("show-integrations", (callback) => () => callback()),
 
   // Accessibility permission events (macOS)
   onAccessibilityMissing: (callback) => {

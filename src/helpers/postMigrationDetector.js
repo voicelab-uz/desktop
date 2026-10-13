@@ -36,6 +36,21 @@ function isReturningFromOldBundle() {
   return fs.existsSync(path.join(userData, ".env"));
 }
 
+/**
+ * A profile without a database has never run VoiceLab (or OpenWhispr), so the
+ * "welcome back" permissions dialog must never target it. The app writes its
+ * own .env and database during the first run, which would otherwise look like
+ * a migrated bundle on the next check. Call this before those files exist.
+ */
+function settleFreshInstall() {
+  if (process.platform !== "darwin") return;
+  if (fs.existsSync(getSentinelPath())) return;
+  const userData = app.getPath("userData");
+  const hasDb = DB_FILENAMES.some((name) => fs.existsSync(path.join(userData, name)));
+  if (hasDb) return;
+  markBundleMigrated();
+}
+
 function markBundleMigrated() {
   try {
     fs.writeFileSync(getSentinelPath(), new Date().toISOString());
@@ -56,4 +71,5 @@ module.exports = {
   isReturningFromOldBundle,
   markBundleMigrated,
   markBundleMigrationDismissed,
+  settleFreshInstall,
 };

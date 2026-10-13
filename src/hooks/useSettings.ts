@@ -56,7 +56,6 @@ export interface OnboardingSettings {
   onboardingUseCases: string[];
   onboardingUseCaseNote: string;
   onboardingRole: string;
-  onboardingWritingNeeds: string[];
   writingStylePersonal: string;
   writingStyleWork: string;
   writingStyleEmail: string;

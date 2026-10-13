@@ -250,6 +250,8 @@ export interface ChoiceOption {
   description?: string;
   icon?: LucideIcon;
   emoji?: string;
+  /** Short text badge (for example a language code) shown instead of an icon. */
+  badge?: string;
 }
 
 interface ChoiceGridProps {
@@ -310,7 +312,7 @@ export function ChoiceGrid({
                 : "border-[var(--onb-card-border)]"
             )}
           >
-            {(Icon || option.emoji) && (
+            {(Icon || option.emoji || option.badge) && (
               <span
                 className={cn(
                   "flex h-7 w-7 items-center justify-center rounded-md text-base",
@@ -320,7 +322,13 @@ export function ChoiceGrid({
                 )}
                 aria-hidden="true"
               >
-                {Icon ? <Icon className="h-4 w-4" strokeWidth={1.8} /> : option.emoji}
+                {Icon ? (
+                  <Icon className="h-4 w-4" strokeWidth={1.8} />
+                ) : option.badge ? (
+                  <span className="text-2xs font-bold uppercase tracking-wide">{option.badge}</span>
+                ) : (
+                  option.emoji
+                )}
               </span>
             )}
             <span className="text-sm font-semibold leading-5 text-[var(--onb-ink)]">

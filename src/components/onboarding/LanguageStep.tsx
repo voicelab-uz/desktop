@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { Sparkles } from "lucide-react";
 import { ChoiceGrid, StepFrame } from "./ui";
 import { getDesktopLanguageOptions } from "../../config/desktopLanguageOptions";
 import { useSettingsStore } from "../../stores/settingsStore";
@@ -42,7 +43,8 @@ export default function LanguageStep() {
         className="max-w-xl"
         options={options.map((option) => ({
           id: option.value,
-          emoji: option.flag,
+          icon: option.value === "auto" ? Sparkles : undefined,
+          badge: option.value === "auto" ? undefined : option.value.toUpperCase(),
           label:
             option.value === "auto"
               ? t("desktop.onboarding.dictationLanguage.auto")

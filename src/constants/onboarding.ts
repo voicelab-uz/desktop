@@ -6,7 +6,6 @@ export const ONBOARDING_STEPS = [
   "signin",
   "about-you",
   "typing-places",
-  "privacy",
   "permissions",
   "mic-test",
   "shortcut",
@@ -16,12 +15,7 @@ export const ONBOARDING_STEPS = [
   "try-it-email",
   "try-it-list",
   "time-savings",
-  "writing-needs",
-  "personalize-intro",
-  "style-personal",
-  "style-work",
-  "style-email",
-  "style-other",
+  "personalize",
   "finish",
 ] as const;
 
@@ -29,29 +23,15 @@ export type OnboardingStep = (typeof ONBOARDING_STEPS)[number];
 
 export const ONBOARDING_SECTIONS = [
   { id: "getStarted", steps: ["welcome", "signin", "about-you", "typing-places"] },
-  { id: "permissions", steps: ["privacy", "permissions"] },
+  { id: "permissions", steps: ["permissions"] },
   { id: "setUp", steps: ["mic-test", "shortcut", "language"] },
   {
     id: "learn",
-    steps: [
-      "try-it-intro",
-      "try-it-message",
-      "try-it-email",
-      "try-it-list",
-      "time-savings",
-      "writing-needs",
-    ],
+    steps: ["try-it-intro", "try-it-message", "try-it-email", "try-it-list", "time-savings"],
   },
   {
     id: "personalize",
-    steps: [
-      "personalize-intro",
-      "style-personal",
-      "style-work",
-      "style-email",
-      "style-other",
-      "finish",
-    ],
+    steps: ["personalize", "finish"],
   },
 ] as const satisfies readonly { id: string; steps: readonly OnboardingStep[] }[];
 

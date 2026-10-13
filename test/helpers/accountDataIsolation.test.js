@@ -38,8 +38,13 @@ function fixture(t) {
       client_message_id TEXT, privacy_scope_id TEXT, role TEXT,
       content TEXT, metadata TEXT, created_at TEXT DEFAULT CURRENT_TIMESTAMP
     );
-    CREATE TABLE folders (id INTEGER PRIMARY KEY, name TEXT, is_default INTEGER, cloud_id TEXT);
-    INSERT INTO folders VALUES (1, 'Personal', 1, NULL), (2, 'Shared', 0, NULL);
+    CREATE TABLE folders (
+      id INTEGER PRIMARY KEY, name TEXT, is_default INTEGER, cloud_id TEXT,
+      privacy_scope_id TEXT NOT NULL DEFAULT 'device-local', sort_order INTEGER DEFAULT 0,
+      client_folder_id TEXT, sync_status TEXT, deleted_at TEXT,
+      created_at TEXT DEFAULT CURRENT_TIMESTAMP, updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+    );
+    INSERT INTO folders (id, name, is_default, cloud_id) VALUES (1, 'Personal', 1, NULL), (2, 'Shared', 0, NULL);
     CREATE TABLE notes (
       id INTEGER PRIMARY KEY, client_note_id TEXT, privacy_scope_id TEXT,
       title TEXT, content TEXT, enhanced_content TEXT, enhancement_prompt TEXT,
@@ -201,4 +206,31 @@ test("conversation lists, messages, previews, search and mutations are account i
   account("A");
   assert.equal(manager.getAgentConversation(conversation.id).title, "private conversation");
   assert.equal(manager.getAgentMessages(conversation.id).length, 1);
+});
+
+test("a person's own folders stay with their account while default folders are shared", (t) => {
+  const { manager, account } = fixture(t);
+  account("A");
+  const created = manager.createFolder("test");
+  assert.equal(created.success, true);
+  assert.deepEqual(
+    manager.getFolders().map((folder) => folder.name),
+    ["Personal", "test"]
+  );
+  account("B");
+  assert.deepEqual(
+    manager.getFolders().map((folder) => folder.name),
+    ["Personal"]
+  );
+  assert.equal(manager.renameFolder(created.folder.id, "mine").success, false);
+  assert.equal(manager.deleteFolder(created.folder.id).success, false);
+  // The same name is free for another account: folder names are per profile.
+  assert.equal(manager.createFolder("test").success, true);
+  assert.equal(manager.createFolder("Personal").success, false);
+  account("A");
+  assert.deepEqual(
+    manager.getFolders().map((folder) => folder.name),
+    ["Personal", "test"]
+  );
+  assert.equal(manager.renameFolder(created.folder.id, "mine").success, true);
 });

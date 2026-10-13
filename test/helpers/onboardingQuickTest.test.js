@@ -13,7 +13,10 @@ test("publishes completed cloud dictation before the optional preview guard", ()
     source.indexOf('this._handle("hide-dictation-preview"')
   );
 
-  assert.match(handler, /this\.broadcastToWindows\("dictation-complete", \{ text: completedText \}\)/);
+  assert.match(
+    handler,
+    /this\.broadcastToWindows\("dictation-complete", \{\s*text: completedText,\s*durationMs: completedDurationMs,\s*\}\)/
+  );
   assert.ok(
     handler.indexOf('this.broadcastToWindows("dictation-complete"') <
       handler.indexOf("if (!dictationPreviewSessionActive)")

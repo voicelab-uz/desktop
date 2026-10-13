@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Loader2, Mic, Square } from "lucide-react";
+import { Loader2, Mic, Square, Users } from "lucide-react";
 import { cn } from "../lib/utils";
 import { formatMmSs } from "../../utils/formatDuration";
 
@@ -8,15 +8,21 @@ const BAR_COUNT = 5;
 
 interface NoteBottomBarProps {
   isRecording: boolean;
+  isDictating?: boolean;
   isProcessing: boolean;
+  /** Voice typing into the note body (microphone only). */
   onStartRecording: () => void;
+  /** Meeting capture (microphone plus system audio) into the transcript. */
+  onStartMeetingRecording?: () => void;
   onStopRecording: () => void;
 }
 
 export default function NoteBottomBar({
   isRecording,
+  isDictating = false,
   isProcessing,
   onStartRecording,
+  onStartMeetingRecording,
   onStopRecording,
 }: NoteBottomBarProps) {
   const { t } = useTranslation();
@@ -55,6 +61,9 @@ export default function NoteBottomBar({
                 />
               ))}
             </div>
+            <span className="text-2xs font-medium text-primary/70 dark:text-primary/80">
+              {isDictating ? t("notes.editor.dictating") : t("notes.editor.recordingMeeting")}
+            </span>
             <span className="text-2xs tabular-nums font-medium text-primary/60 dark:text-primary/70">
               {formatMmSs(elapsed)}
             </span>
@@ -65,17 +74,35 @@ export default function NoteBottomBar({
             <Loader2 size={14} className="animate-spin text-foreground/25" />
           </div>
         ) : (
-          <button
-            onClick={onStartRecording}
-            className={cn(
-              "flex h-10 w-10 items-center justify-center rounded-xl border border-border/20 bg-foreground/3 text-foreground/30 transition-all duration-200",
-              "hover:border-border/30 hover:bg-foreground/6 hover:text-foreground/50 active:scale-95",
-              "dark:border-white/6 dark:bg-white/4 dark:text-foreground/20 dark:hover:border-white/10 dark:hover:bg-white/8 dark:hover:text-foreground/35"
+          <div className="flex items-center gap-1.5">
+            <button
+              onClick={onStartRecording}
+              className={cn(
+                "flex h-10 items-center gap-2 rounded-xl border border-border/20 bg-foreground/3 px-3.5 text-foreground/45 transition-all duration-200",
+                "hover:border-border/30 hover:bg-foreground/6 hover:text-foreground/70 active:scale-[0.98]",
+                "dark:border-white/6 dark:bg-white/4 dark:text-foreground/40 dark:hover:border-white/10 dark:hover:bg-white/8 dark:hover:text-foreground/70"
+              )}
+              aria-label={t("notes.editor.dictate")}
+              title={t("notes.editor.dictate")}
+            >
+              <Mic size={15} />
+              <span className="text-xs font-medium">{t("notes.editor.dictate")}</span>
+            </button>
+            {onStartMeetingRecording && (
+              <button
+                onClick={onStartMeetingRecording}
+                className={cn(
+                  "flex h-10 w-10 items-center justify-center rounded-xl border border-border/20 bg-foreground/3 text-foreground/30 transition-all duration-200",
+                  "hover:border-border/30 hover:bg-foreground/6 hover:text-foreground/50 active:scale-95",
+                  "dark:border-white/6 dark:bg-white/4 dark:text-foreground/20 dark:hover:border-white/10 dark:hover:bg-white/8 dark:hover:text-foreground/35"
+                )}
+                aria-label={t("notes.editor.recordMeeting")}
+                title={t("notes.editor.recordMeeting")}
+              >
+                <Users size={15} />
+              </button>
             )}
-            aria-label={t("notes.editor.transcribe")}
-          >
-            <Mic size={15} />
-          </button>
+          </div>
         )}
       </div>
     </div>

@@ -152,6 +152,7 @@ interface NoteEditorProps {
   isRecording: boolean;
   isProcessing: boolean;
   onStartRecording: () => void;
+  onStartMeetingRecording?: () => void;
   onStopRecording: () => void;
   onExportNote?: (format: "md" | "txt") => void;
   onExportTranscript?: (format: "txt" | "srt" | "json" | "md") => void;
@@ -178,6 +179,7 @@ export default function NoteEditor({
   isRecording,
   isProcessing,
   onStartRecording,
+  onStartMeetingRecording,
   onStopRecording,
   onExportNote,
   onExportTranscript,
@@ -210,6 +212,9 @@ export default function NoteEditor({
     Array<{ id: number; display_name: string; email: string | null }>
   >([]);
   const editorRef = useRef<Editor | null>(null);
+  const recordingMode = useMeetingRecordingStore((s) => s.recordingMode);
+  const isDictating = isRecording && recordingMode === "dictation";
+  const isMeetingRecording = isRecording && !isDictating;
   const displaySegmentsRef = useRef<TranscriptSegment[]>([]);
 
   const titleRef = useRef<HTMLDivElement>(null);
@@ -545,11 +550,81 @@ export default function NoteEditor({
 
   const prevRecordingRef = useRef(false);
   useEffect(() => {
-    if (isRecording && !prevRecordingRef.current) {
+    if (isMeetingRecording && !prevRecordingRef.current) {
       scheduleUiUpdate(() => setViewMode("transcript"));
     }
-    prevRecordingRef.current = isRecording;
-  }, [isRecording, scheduleUiUpdate]);
+    prevRecordingRef.current = isMeetingRecording;
+  }, [isMeetingRecording, scheduleUiUpdate]);
+
+  // Voice typing: each phrase the server finishes is appended to the end of
+  // the note without moving the person's cursor. Words are revealed one by one
+  // so the note reads as if it is being typed while the person speaks, and
+  // phrases are tracked by id so a store update never inserts text twice.
+  const dictatedSegmentIdsRef = useRef<Set<string>>(new Set());
+  const dictationQueueRef = useRef<string[]>([]);
+  const dictationTimerRef = useRef<number | null>(null);
+  const appendDictatedText = useCallback((text: string) => {
+    const editor = editorRef.current;
+    if (!editor || editor.isDestroyed || !text) return;
+    const existing = editor.getText();
+    const separator = existing && !/\s$/.test(existing) ? " " : "";
+    // Continue the last paragraph instead of starting a new block for each
+    // phrase, and leave the person's selection where it is.
+    const { doc } = editor.state;
+    const lastBlock = doc.lastChild;
+    const position = lastBlock?.isTextblock ? doc.content.size - 1 : doc.content.size;
+    editor.commands.insertContentAt(position, separator + text, { updateSelection: false });
+  }, []);
+  const flushDictationQueue = useCallback(() => {
+    if (dictationTimerRef.current !== null) {
+      window.clearTimeout(dictationTimerRef.current);
+      dictationTimerRef.current = null;
+    }
+    const rest = dictationQueueRef.current.join(" ");
+    dictationQueueRef.current = [];
+    appendDictatedText(rest);
+  }, [appendDictatedText]);
+  const pumpDictationQueue = useCallback(() => {
+    if (dictationTimerRef.current !== null) return;
+    const step = () => {
+      const word = dictationQueueRef.current.shift();
+      if (word === undefined) {
+        dictationTimerRef.current = null;
+        return;
+      }
+      appendDictatedText(word);
+      // Faster when a backlog builds up, so the note never trails far behind.
+      const backlog = dictationQueueRef.current.length;
+      const delay = backlog > 12 ? 18 : backlog > 6 ? 30 : 48;
+      dictationTimerRef.current = window.setTimeout(step, delay);
+    };
+    step();
+  }, [appendDictatedText]);
+  useEffect(() => {
+    if (!isDictating) {
+      dictatedSegmentIdsRef.current = new Set();
+      flushDictationQueue();
+      return undefined;
+    }
+    dictatedSegmentIdsRef.current = new Set(
+      useMeetingRecordingStore.getState().segments.map((segment) => segment.id)
+    );
+    const unsubscribe = useMeetingRecordingStore.subscribe((state) => {
+      if (state.recordingNoteId !== note.id) return;
+      for (const segment of state.segments) {
+        if (segment.source !== "mic" || dictatedSegmentIdsRef.current.has(segment.id)) continue;
+        dictatedSegmentIdsRef.current.add(segment.id);
+        const words = segment.text.trim().split(/\s+/).filter(Boolean);
+        if (words.length === 0) continue;
+        dictationQueueRef.current.push(...words);
+        pumpDictationQueue();
+      }
+    });
+    return () => {
+      unsubscribe();
+      flushDictationQueue();
+    };
+  }, [isDictating, note.id, flushDictationQueue, pumpDictationQueue]);
 
   const handleContentChange = useCallback(
     (newValue: string) => {
@@ -713,7 +788,7 @@ export default function NoteEditor({
             )}
             <div className="flex-1" />
             <div className="flex items-center gap-1">
-              {(enhancement || hasMeetingTranscript || hasChatSegments || isRecording) && (
+              {(enhancement || hasMeetingTranscript || hasChatSegments || isMeetingRecording) && (
                 <div
                   ref={segmentContainerRef}
                   className="relative flex items-center shrink-0 rounded-md bg-foreground/3 dark:bg-white/3 p-0.5"
@@ -722,7 +797,7 @@ export default function NoteEditor({
                     className="absolute top-0.5 left-0 rounded bg-background dark:bg-surface-2 shadow-sm transition-[width,height,transform,opacity] duration-200 ease-out pointer-events-none"
                     style={indicatorStyle}
                   />
-                  {(hasMeetingTranscript || hasChatSegments || isRecording) && (
+                  {(hasMeetingTranscript || hasChatSegments || isMeetingRecording) && (
                     <button
                       data-segment-button
                       data-segment-value="transcript"
@@ -870,8 +945,8 @@ export default function NoteEditor({
 
         <div className="flex-1 relative min-h-0">
           <div className="h-full overflow-y-auto">
-            {viewMode === "transcript" && (hasChatSegments || isRecording) ? (
-              isRecording ? (
+            {viewMode === "transcript" && (hasChatSegments || isMeetingRecording) ? (
+              isMeetingRecording ? (
                 <LiveMeetingTranscriptChat
                   speakerMappings={speakerMappings}
                   speakerProfiles={speakerProfiles}
@@ -912,12 +987,14 @@ export default function NoteEditor({
             ) : viewMode === "enhanced" && enhancement ? (
               <RichTextEditor value={enhancement.content} onChange={handleEnhancedChange} />
             ) : (
-              <RichTextEditor
-                value={note.content}
-                onChange={handleContentChange}
-                editorRef={editorRef}
-                placeholder={t("notes.editor.startWriting")}
-              />
+              <div className={isDictating ? "note-dictating" : undefined}>
+                <RichTextEditor
+                  value={note.content}
+                  onChange={handleContentChange}
+                  editorRef={editorRef}
+                  placeholder={t("notes.editor.startWriting")}
+                />
+              </div>
             )}
           </div>
           <div
@@ -940,8 +1017,10 @@ export default function NoteEditor({
           )}
           <NoteBottomBar
             isRecording={isRecording}
+            isDictating={isDictating}
             isProcessing={isProcessing}
             onStartRecording={onStartRecording}
+            onStartMeetingRecording={onStartMeetingRecording}
             onStopRecording={onStopRecording}
           />
         </div>

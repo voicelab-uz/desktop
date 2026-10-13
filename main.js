@@ -149,6 +149,9 @@ function configureChannelUserDataPath() {
 }
 
 configureChannelUserDataPath();
+// Must run before the database or the hotkey .env file is created, otherwise a
+// brand-new profile is mistaken for one migrated from the old OpenWhispr bundle.
+require("./src/helpers/postMigrationDetector").settleFreshInstall();
 
 // Load userData .env (contains DICTATION_KEY and optional BYOK provider keys) early —
 // before hotkey registration, which needs DICTATION_KEY before the renderer loads.

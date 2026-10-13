@@ -2439,7 +2439,11 @@
       "conversationWillAppear": "Conversation will appear here...",
       "linkedEvent": "Linked event",
       "noFolder": "No folder",
-      "participants": "Participants"
+      "participants": "Participants",
+      "dictate": "Dictate",
+      "dictating": "Dictating",
+      "recordMeeting": "Record meeting",
+      "recordingMeeting": "Recording meeting"
     },
     "participants": {
       "attendee": "attendee",
@@ -2793,6 +2797,23 @@
       "stopListening": "Stop listening",
       "startListening": "Start listening",
       "hideForNow": "Hide for now"
+    },
+    "island": {
+      "dictate": "Dictate",
+      "meetingButton": "Meeting notes",
+      "card": {
+        "eyebrow": "Meeting notes",
+        "title": "Take notes for this meeting",
+        "nowTitle": "{{title}} is happening now",
+        "upcomingTitle": "{{title}} starts in {{minutes}} min",
+        "recordingTitle": "Meeting notes are recording",
+        "body": "Get a full transcript with speakers and action items, without typing.",
+        "recordingBody": "Everything said is being transcribed into your note.",
+        "start": "Start meeting notes",
+        "open": "Open notes",
+        "notNow": "Not now",
+        "connectCalendar": "Connect calendar"
+      }
     }
   },
   "dictationTranslation": {
@@ -3281,15 +3302,6 @@
           "other": "Something else"
         }
       },
-      "privacy": {
-        "title": "You control your data",
-        "description": "Decide what VoiceLab keeps on this computer and what it shares.",
-        "historyTitle": "Keep my dictation history on this device",
-        "historyDescription": "Lets you search and reuse past dictations in VoiceLab.",
-        "usageTitle": "Share anonymous usage data",
-        "usageDescription": "Helps us find bugs and improve VoiceLab. Never includes your audio or text.",
-        "note": "Audio is sent to VoiceLab Cloud only to transcribe it. You can change these anytime in Settings."
-      },
       "permissions": {
         "headerInProgress": "Give VoiceLab permissions on your computer",
         "headerComplete": "Thanks for trusting us. We value your privacy.",
@@ -3411,81 +3423,6 @@
         "saveHours": "{{count}} hours",
         "saveSuffix": "a week!"
       },
-      "writingNeeds": {
-        "title": "Let's talk about your relationship with typing.",
-        "description": "Learning how you type helps us find the ways VoiceLab can be helpful to you.",
-        "options": {
-          "captureIdeas": "I need to capture ideas quickly",
-          "draftDocuments": "I need to draft documents with less effort",
-          "manyEmails": "I have to write a lot of emails",
-          "manyMessages": "I have to write a lot of messages",
-          "typingTiring": "I think typing is tiring or uncomfortable",
-          "handsFree": "I need to work hands-free or on the go",
-          "aiPrompts": "I want to write more detailed AI prompts",
-          "codeWithAi": "I want to code with AI more easily"
-        }
-      },
-      "personalizeIntro": {
-        "titlePrefix": "Next, let's personalize",
-        "titleAccent": "your",
-        "titleSuffix": "VoiceLab",
-        "description": "Choose how VoiceLab formats your dictations in different kinds of writing.",
-        "appearance": "Appearance",
-        "light": "Light",
-        "dark": "Dark",
-        "system": "System",
-        "later": "Set up later"
-      },
-      "style": {
-        "titlePrefix": "How do you write your",
-        "titleSuffix": "?",
-        "legend": "Highlighted parts show what changes: wording and capitalization are shaded, punctuation is blue.",
-        "names": {
-          "casual": "Casual",
-          "formal": "Formal",
-          "excited": "Excited!"
-        },
-        "hints": {
-          "casual": "Light punctuation, relaxed wording",
-          "formal": "Full punctuation, polished wording",
-          "excited": "More exclamation marks!"
-        },
-        "personal": {
-          "subject": "personal messages",
-          "description": "We'll apply this style to personal messages.",
-          "samples": {
-            "casual": "[hey] are you free for lunch tomorrow? [let's] do 12 if that works for you",
-            "formal": "[Hey]{,} are you free for lunch tomorrow? [Let's] do 12 if that works for you{.}"
-          }
-        },
-        "work": {
-          "subject": "work messages",
-          "description": "We'll apply this style to work messages.",
-          "samples": {
-            "casual": "[hey] if you're free let's chat about the great results",
-            "formal": "[Hey]{,} if you're free{,} let's chat about the great results{.}",
-            "excited": "[Hey]{,} if you're free{,} let's chat about the great results{!}"
-          }
-        },
-        "email": {
-          "subject": "emails",
-          "description": "We'll apply this style to emails.",
-          "samples": {
-            "casual": "[Hi] Alex{,} it was great talking with you today. [Looking] forward to our next chat{.}\n\nBest,\nMary",
-            "formal": "[Hi] Alex{,}\n\n[It] was great talking with you today. [Looking] forward to our next chat{.}\n\nBest,\nMary",
-            "excited": "[Hi] Alex{,}\n\n[It] was great talking with you today. [Looking] forward to our next chat{!}\n\nBest,\nMary"
-          }
-        },
-        "other": {
-          "subject": "other apps",
-          "description": "We'll apply this style to all other apps.",
-          "samples": {
-            "casual": "[So] far [I'm] enjoying the new workout routine.\n\n[I'm] excited for tomorrow's workout especially after a full night of rest.",
-            "formal": "[So] far{,} [I am] enjoying the new workout routine.\n\n[I am] excited for tomorrow's workout{,} especially after a full night of rest.",
-            "excited": "[So] far{,} [I'm] enjoying the new workout routine.\n\n[I'm] excited for tomorrow's workout{,} especially after a full night of rest{!}"
-          }
-        }
-      },
       "finish": {
         "title": "Go try VoiceLab in another app",
         "subtitle": "No additional setup needed.",
@@ -3499,6 +3436,33 @@
       },
       "ready": {
         "greeting": "Hello, {{name}}"
+      },
+      "personalize": {
+        "titlePrefix": "How do you",
+        "titleAccent": "write",
+        "titleSuffix": "?",
+        "description": "VoiceLab formats your dictations in this style. You can change it anytime in Settings.",
+        "names": {
+          "casual": "Casual",
+          "formal": "Formal",
+          "excited": "Excited!"
+        },
+        "hints": {
+          "casual": "Light punctuation, relaxed wording",
+          "formal": "Full punctuation, polished wording",
+          "excited": "More exclamation marks!"
+        },
+        "samples": {
+          "casual": "[hey] are you free for lunch tomorrow? [let's] do 12 if that works for you",
+          "formal": "[Hey]{,} are you free for lunch tomorrow? [Let's] do 12 if that works for you{.}",
+          "excited": "[Hey]{,} are you free for lunch tomorrow? [Let's] do 12 if that works for you{!}"
+        },
+        "legend": "Highlighted parts show what changes: wording and capitalization are shaded, punctuation is blue.",
+        "appearance": "Appearance",
+        "light": "Light",
+        "dark": "Dark",
+        "system": "System",
+        "later": "Set up later"
       }
     },
     "dictionary": {

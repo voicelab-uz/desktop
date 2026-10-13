@@ -29,10 +29,12 @@ const FLOATING_OVERLAY_TYPE =
       : "normal";
 
 const WINDOW_SIZES = {
-  // The compact wave-only control plus its temporary cancel action and drag hit area.
-  BASE: { width: 144, height: 64 },
+  // The pill plus everything hovering reveals beside and above it (cancel
+  // action, meeting-notes action, shortcut label). Sized once so hovering never
+  // resizes the window: a resize under the pointer re-triggers hover and flickers.
+  BASE: { width: 224, height: 96 },
   // Compact icon-only actions above the base dictation control.
-  WITH_MENU: { width: 144, height: 112 },
+  WITH_MENU: { width: 224, height: 144 },
   WITH_TOAST: { width: 400, height: 500 },
   EXPANDED: { width: 400, height: 500 },
 };

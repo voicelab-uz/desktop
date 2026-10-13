@@ -1109,3 +1109,178 @@ test("concurrent begin calls reserve the single dictation slot before usage reso
   const operation = await first;
   client.finishDictation(operation);
 });
+
+test("desktop onboarding read treats a missing profile as null and keeps the desktop boundary", async (t) => {
+  const VoiceLabApiClient = loadClient(t);
+  const { client, authManager } = createClient(VoiceLabApiClient);
+  const calls = [];
+  installFetch(t, async (url, init) => {
+    calls.push({ url, init });
+    if (calls.length === 1) {
+      return jsonResponse(
+        {
+          message: "No desktop onboarding profile has been saved for this account.",
+          error: { code: "desktop_onboarding_not_found" },
+          request_id: "req_onboarding_missing",
+        },
+        404
+      );
+    }
+    return jsonResponse({
+      onboarding: {
+        role: "developer",
+        use_cases: ["coding", "fax", "messages"],
+        dictation_language: "uz",
+        writing_style: "formal",
+        ui_language: "uz",
+        theme: "dark",
+        app_version: "1.2.2",
+        platform: "darwin",
+        revision: 3,
+        completed_at: "2026-10-13T01:40:00Z",
+        updated_at: "2026-10-13T02:40:00Z",
+      },
+      request_id: "req_onboarding_read",
+    });
+  });
+
+  assert.equal(await client.getDesktopOnboarding(), null);
+  const profile = await client.getDesktopOnboarding();
+  assert.deepEqual(profile, {
+    role: "developer",
+    useCases: ["coding", "messages"],
+    dictationLanguage: "uz",
+    writingStyle: "formal",
+    uiLanguage: "uz",
+    theme: "dark",
+    appVersion: "1.2.2",
+    platform: "darwin",
+    revision: 3,
+    completedAt: "2026-10-13T01:40:00Z",
+    updatedAt: "2026-10-13T02:40:00Z",
+    requestId: "req_onboarding_read",
+  });
+  assert.equal(calls.length, 2);
+  for (const { url, init } of calls) {
+    assert.equal(url, `${API_BASE_URL}/v1/desktop/onboarding`);
+    assert.equal(init.method, "GET");
+    const headers = new Headers(init.headers);
+    assert.equal(headers.get("authorization"), "Bearer desktop-access-token-1");
+    assert.equal(headers.has("x-voicelab-client"), false);
+    assert.equal(headers.has("x-voicelab-installation-id"), false);
+    assert.equal(headers.has("content-type"), false);
+  }
+  assert.equal(authManager.state.refreshCalls, 0);
+});
+
+test("desktop onboarding save sends one exact JSON body and surfaces validation fields", async (t) => {
+  const VoiceLabApiClient = loadClient(t);
+  const { client } = createClient(VoiceLabApiClient);
+  const calls = [];
+  installFetch(t, async (url, init) => {
+    calls.push({ url, init });
+    if (calls.length === 1) {
+      return jsonResponse({
+        onboarding: {
+          role: "developer",
+          use_cases: ["coding"],
+          dictation_language: "auto",
+          revision: 1,
+          completed_at: "2026-10-13T01:40:00Z",
+          updated_at: "2026-10-13T01:40:02Z",
+        },
+        request_id: "req_onboarding_saved",
+      });
+    }
+    return jsonResponse(
+      {
+        message: "Some onboarding answers are not valid.",
+        error: { code: "validation_error", fields: { role: "Choose one of the listed roles." } },
+        request_id: "req_onboarding_invalid",
+      },
+      422
+    );
+  });
+
+  const saved = await client.saveDesktopOnboarding({
+    role: " Developer ",
+    useCases: ["Coding", "coding", ""],
+    dictationLanguage: "",
+    writingStyle: "",
+    uiLanguage: "en-US",
+    theme: "dark",
+    completedAt: "2026-10-13T01:40:00Z",
+  });
+  assert.equal(saved.revision, 1);
+  assert.equal(saved.role, "developer");
+  assert.equal(saved.writingStyle, "");
+  assert.equal(saved.dictationLanguage, "auto");
+  assert.equal(saved.requestId, "req_onboarding_saved");
+
+  assert.equal(calls[0].url, `${API_BASE_URL}/v1/desktop/onboarding`);
+  assert.equal(calls[0].init.method, "PUT");
+  assert.equal(new Headers(calls[0].init.headers).get("content-type"), "application/json");
+  assert.deepEqual(JSON.parse(calls[0].init.body), {
+    role: "developer",
+    use_cases: ["coding"],
+    dictation_language: "auto",
+    writing_style: "",
+    ui_language: "en-us",
+    theme: "dark",
+    app_version: "1.7.15",
+    platform: process.platform,
+    completed_at: "2026-10-13T01:40:00Z",
+  });
+
+  await assert.rejects(
+    client.saveDesktopOnboarding({ role: "wizard" }),
+    (error) =>
+      error.code === "INVALID_REQUEST" &&
+      error.status === 422 &&
+      error.details.error.fields.role === "Choose one of the listed roles."
+  );
+  assert.equal(calls.length, 2);
+});
+
+test("meeting segments add the purpose field and accept a response without a saved record", async (t) => {
+  const VoiceLabApiClient = loadClient(t);
+  const { client } = createClient(VoiceLabApiClient);
+  const calls = [];
+  installFetch(t, async (url, init) => {
+    calls.push({ url, init });
+    return jsonResponse({
+      text: "meeting fixture",
+      language: "uz",
+      duration_ms: 6500,
+      audio_available: false,
+      usage: {
+        used_seconds: 7,
+        usage_window: "day",
+        limit_seconds: 28_800,
+        remaining_seconds: 28_793,
+      },
+      request_id: "req_meeting_chunk",
+    });
+  });
+
+  const response = await client.sendDictationChunk(operation(), new Uint8Array([1, 2, 3]), {
+    contentType: "audio/wav",
+    purpose: "meeting",
+  });
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].url, DESKTOP_STT_URL);
+  assert.deepEqual([...calls[0].init.body.keys()], ["audio", "language", "purpose"]);
+  assert.equal(calls[0].init.body.get("purpose"), "meeting");
+  assert.equal(response.text, "meeting fixture");
+  assert.equal("id" in response, false);
+  const publicResult = await client.publicResult(response, "local-operation-1");
+  assert.equal(publicResult.desktopTranscriptionId, null);
+  assert.equal(publicResult.desktopAudioAvailable, false);
+  assert.equal(publicResult.audioDurationMs, 6500);
+
+  calls.length = 0;
+  await client.sendDictationChunk(operation(), new Uint8Array([1, 2, 3]), {
+    contentType: "audio/wav",
+  });
+  assert.deepEqual([...calls[0].init.body.keys()], ["audio", "language"]);
+});

@@ -3102,6 +3102,7 @@ class IPCHandlers {
       contentType,
       fileName,
       signal,
+      purpose = null,
     }) => {
       if (!this.voiceLabApiClient) throw new Error("VoiceLab client unavailable");
       const assertContext = captureHistoryContext();
@@ -3121,6 +3122,7 @@ class IPCHandlers {
           contentType,
           fileName,
           signal,
+          purpose,
         });
         const response = await this.voiceLabApiClient.publicResult(result, operation.operationId);
         assertContext();
@@ -3276,10 +3278,24 @@ class IPCHandlers {
     const DUPLICATE_TRANSCRIPT_WINDOW_MS = 6000;
     const DUPLICATE_TRANSCRIPT_MERGE_LIMIT = 3;
     const STREAMING_RISKY_MIC_SEGMENT_HOLDBACK_MS = 3000;
-    const LOCAL_MEETING_CHUNK_INTERVAL_MS = 5000;
-    // Must outlast one local transcription cycle so a straddling remote
-    // utterance's next-cycle system transcript can confirm buffered echo.
-    const LOCAL_RISKY_MIC_SEGMENT_HOLDBACK_MS = LOCAL_MEETING_CHUNK_INTERVAL_MS + 1000;
+    // Meeting audio is cut at pauses rather than on a fixed clock: a segment is
+    // sent once it holds at least MIN audio that ends in a short silence, or
+    // when it reaches MAX. Whole words survive, far fewer requests are made,
+    // and less of the per-request second rounding is lost from the allowance.
+    const LOCAL_MEETING_FLUSH_POLL_MS = 250;
+    // Meetings favour whole sentences; dictation into a note favours showing
+    // words quickly, so it cuts at shorter pauses and smaller segments.
+    const MEETING_SEGMENT_PROFILE = { minMs: 1500, maxMs: 15000, endSilenceMs: 700 };
+    const DICTATION_SEGMENT_PROFILE = { minMs: 900, maxMs: 7000, endSilenceMs: 420 };
+    const LOCAL_MEETING_SILENCE_RMS = 0.006;
+    // Audio kept while the server is briefly unavailable; older audio is dropped.
+    const LOCAL_MEETING_MAX_BACKLOG_MS = 60000;
+    const LOCAL_MEETING_RETRY_BASE_MS = 2000;
+    const LOCAL_MEETING_RETRY_MAX_MS = 20000;
+    const LOCAL_MEETING_ERROR_TOAST_INTERVAL_MS = 30000;
+    // Must outlast a typical segment's transcription so a straddling remote
+    // utterance's next system transcript can confirm buffered echo.
+    const LOCAL_RISKY_MIC_SEGMENT_HOLDBACK_MS = 7000;
     const RACING_MIC_RETRACT_WINDOW_MS = 4000;
 
     const buildNearbyTranscriptCandidates = (
@@ -4032,7 +4048,17 @@ class IPCHandlers {
 
     let meetingLocalMode = false;
     let meetingLocalBuffers = { mic: [], system: [] };
+    let meetingLocalSegmentProfile = MEETING_SEGMENT_PROFILE;
     let meetingLocalTimer = null;
+    let meetingLocalRetryAt = 0;
+    let meetingLocalRetryDelayMs = 0;
+    let meetingLocalLastErrorToastAt = 0;
+    // Set when the account can no longer transcribe (allowance, plan, session);
+    // the renderer is told once and audio stops being sent.
+    let meetingLocalHalted = null;
+    // Older servers reject the purpose field; remembered per session so a
+    // meeting keeps transcribing (its chunks then land in history as before).
+    let meetingPurposeUnsupported = false;
     let meetingLocalWin = null;
     let meetingLocalTranscript = "";
     let meetingLocalProvider = null;
@@ -4113,7 +4139,7 @@ class IPCHandlers {
     const dispatchMeetingAudioBuffer = (buffer, source) => {
       if (source === "system" && !meetingSystemAudioCaptureEnabled) return;
       if (meetingLocalMode) {
-        meetingLocalBuffers[source].push(buffer);
+        if (!meetingLocalHalted) meetingLocalBuffers[source].push(meetingLocalEntry(buffer));
         return;
       }
 
@@ -4381,12 +4407,130 @@ class IPCHandlers {
       return started;
     };
 
-    const transcribeLocalMeetingChunk = async (source) => {
-      const chunks = meetingLocalBuffers[source];
-      if (!chunks.length) return;
+    // One 24 kHz PCM16 chunk from the renderer with its level, so segment
+    // boundaries can be chosen at pauses without decoding the audio again.
+    const meetingLocalEntry = (buffer) => {
+      const samples = new Int16Array(buffer.buffer, buffer.byteOffset, buffer.length >> 1);
+      let sumSq = 0;
+      for (let i = 0; i < samples.length; i++) {
+        const n = samples[i] / 0x7fff;
+        sumSq += n * n;
+      }
+      return {
+        buffer,
+        ms: (samples.length / 24000) * 1000,
+        rms: samples.length ? Math.sqrt(sumSq / samples.length) : 0,
+      };
+    };
 
-      const pcm24k = Buffer.concat(chunks);
+    const meetingLocalSegmentReady = (source) => {
+      const entries = meetingLocalBuffers[source];
+      if (!entries.length) return false;
+      const profile = meetingLocalSegmentProfile;
+      let total = 0;
+      for (const entry of entries) total += entry.ms;
+      if (total >= profile.maxMs) return true;
+      let trailingSilence = 0;
+      for (let i = entries.length - 1; i >= 0 && entries[i].rms < LOCAL_MEETING_SILENCE_RMS; i--) {
+        trailingSilence += entries[i].ms;
+      }
+      if (trailingSilence >= total) {
+        // Nothing but silence so far: keep a short tail for context, drop the rest.
+        while (entries.length > 1 && total - entries[0].ms >= profile.endSilenceMs) {
+          total -= entries.shift().ms;
+        }
+        return false;
+      }
+      return total >= profile.minMs && trailingSilence >= profile.endSilenceMs;
+    };
+
+    const flushReadyMeetingSegments = () => {
+      if (meetingLocalHalted || Date.now() < meetingLocalRetryAt) return;
+      const ready = {
+        system: meetingLocalSegmentReady("system"),
+        mic: meetingLocalSegmentReady("mic"),
+      };
+      if (ready.system || ready.mic) transcribeAllLocalBuffers(ready);
+    };
+
+    const sendMeetingLocalEvent = (channel, payload) => {
+      if (meetingLocalWin && !meetingLocalWin.isDestroyed()) {
+        meetingLocalWin.webContents.send(channel, payload);
+      }
+    };
+
+    // The account cannot transcribe any further this session: stop sending
+    // audio and let the renderer end the recording with the transcript so far.
+    const MEETING_TERMINAL_ERROR_CODES = new Set([
+      "DAILY_CAP_REACHED",
+      "ENTITLEMENT_REQUIRED",
+      "INSUFFICIENT_CREDITS",
+      "AUTH_EXPIRED",
+      "AUTH_REQUIRED",
+      "AUTH_ACCOUNT_CHANGED",
+    ]);
+    // This segment is unusable (quiet, too short, rejected) but the meeting
+    // continues; nothing to show the person.
+    const MEETING_DROP_ERROR_CODES = new Set([
+      "NO_SPEECH_DETECTED",
+      "AUDIO_INVALID",
+      "AUDIO_LIMIT_EXCEEDED",
+      "AUDIO_LANGUAGE_UNSUPPORTED",
+      "INVALID_REQUEST",
+      "CANCELLED",
+    ]);
+
+    const requeueMeetingLocalEntries = (source, entries) => {
+      const merged = [...entries, ...meetingLocalBuffers[source]];
+      let total = merged.reduce((sum, entry) => sum + entry.ms, 0);
+      while (merged.length && total > LOCAL_MEETING_MAX_BACKLOG_MS) total -= merged.shift().ms;
+      meetingLocalBuffers[source] = merged;
+    };
+
+    const handleLocalMeetingChunkFailure = (source, error, entries) => {
+      const code = error?.code || "BACKEND_FAILED";
+      debugLogger.error("Local meeting transcription chunk failed", {
+        source,
+        code,
+        error: error.message,
+      });
+      if (MEETING_TERMINAL_ERROR_CODES.has(code)) {
+        meetingLocalHalted = { code, message: error.message };
+        meetingLocalBuffers = { mic: [], system: [] };
+        if (meetingLocalTimer) {
+          clearInterval(meetingLocalTimer);
+          meetingLocalTimer = null;
+        }
+        sendMeetingLocalEvent("meeting-transcription-halted", { code, message: error.message });
+        return;
+      }
+      if (MEETING_DROP_ERROR_CODES.has(code)) return;
+      // Transient failure: keep the audio, retry with backoff, and do not
+      // repeat the same toast every few seconds.
+      requeueMeetingLocalEntries(source, entries);
+      meetingLocalRetryDelayMs = Math.min(
+        LOCAL_MEETING_RETRY_MAX_MS,
+        meetingLocalRetryDelayMs ? meetingLocalRetryDelayMs * 2 : LOCAL_MEETING_RETRY_BASE_MS
+      );
+      const retryAfterMs =
+        Number.isFinite(error?.retryAfterSeconds) && error.retryAfterSeconds > 0
+          ? error.retryAfterSeconds * 1000
+          : 0;
+      meetingLocalRetryAt = Date.now() + Math.max(retryAfterMs, meetingLocalRetryDelayMs);
+      const now = Date.now();
+      if (now - meetingLocalLastErrorToastAt >= LOCAL_MEETING_ERROR_TOAST_INTERVAL_MS) {
+        meetingLocalLastErrorToastAt = now;
+        sendMeetingLocalEvent("meeting-transcription-error", error.message);
+      }
+    };
+
+    const transcribeLocalMeetingChunk = async (source) => {
+      const entries = meetingLocalBuffers[source];
+      if (!entries.length || meetingLocalHalted) return;
+
+      const pcm24k = Buffer.concat(entries.map((entry) => entry.buffer));
       meetingLocalBuffers[source] = [];
+      const chunkDurationMs = (pcm24k.length / 2 / 24000) * 1000;
 
       const pcm16k = downsample24kTo16k(pcm24k);
 
@@ -4413,7 +4557,7 @@ class IPCHandlers {
         source === "mic" &&
         rms < MEETING_MIC_BLEED_RMS_CEILING &&
         peak < MEETING_MIC_BLEED_PEAK_CEILING &&
-        meetingEchoLeakDetector.isSystemSpeaking(Date.now() - LOCAL_MEETING_CHUNK_INTERVAL_MS)
+        meetingEchoLeakDetector.isSystemSpeaking(Date.now() - chunkDurationMs)
       ) {
         debugLogger.debug("Skipping system-dominant mic chunk", {
           source,
@@ -4428,14 +4572,32 @@ class IPCHandlers {
       try {
         let result;
         const durationMs = Math.round((pcm16k.length / 2 / 16000) * 1000);
-        const response = await transcribeWithVoiceLab({
-          buffer: wav,
-          source: `meeting-${source}`,
-          durationMs,
-          language: meetingLocalLanguage || null,
-          contentType: "audio/wav",
-          fileName: `meeting-${source}.wav`,
-        });
+        const transcribeSegment = (purpose) =>
+          transcribeWithVoiceLab({
+            buffer: wav,
+            source: `meeting-${source}`,
+            durationMs,
+            language: meetingLocalLanguage || null,
+            contentType: "audio/wav",
+            fileName: `meeting-${source}.wav`,
+            // Metered like dictation, but never saved to the dictation history.
+            purpose,
+          });
+        let response;
+        try {
+          response = await transcribeSegment(meetingPurposeUnsupported ? null : "meeting");
+        } catch (error) {
+          const rejectedPurpose =
+            !meetingPurposeUnsupported &&
+            error?.code === "INVALID_REQUEST" &&
+            error?.details?.error?.code === "invalid_multipart";
+          if (!rejectedPurpose) throw error;
+          meetingPurposeUnsupported = true;
+          debugLogger.warn("Server does not accept the meeting purpose field; retrying without it");
+          response = await transcribeSegment(null);
+        }
+        meetingLocalRetryAt = 0;
+        meetingLocalRetryDelayMs = 0;
         result = { ...response, source: "voicelab" };
 
         if (result?.success && result.text?.trim()) {
@@ -4443,7 +4605,6 @@ class IPCHandlers {
           const segTimestamp = Date.now();
           let micSuppression = null;
           if (source === "mic") {
-            const chunkDurationMs = (pcm24k.length / 2 / 24000) * 1000;
             micSuppression = shouldSuppressMicTranscriptSegment(
               segTimestamp - chunkDurationMs,
               segTimestamp
@@ -4553,25 +4714,19 @@ class IPCHandlers {
           });
         }
       } catch (error) {
-        debugLogger.error("Local meeting transcription chunk failed", {
-          source,
-          error: error.message,
-        });
-        if (meetingLocalWin && !meetingLocalWin.isDestroyed()) {
-          meetingLocalWin.webContents.send("meeting-transcription-error", error.message);
-        }
+        handleLocalMeetingChunkFailure(source, error, entries);
       }
     };
 
-    const transcribeAllLocalBuffers = () => {
+    const transcribeAllLocalBuffers = ({ system = true, mic = true } = {}) => {
       const previous = meetingLocalTranscriptionPromise || Promise.resolve();
       const queued = previous
         .catch(() => {})
         .then(async () => {
           meetingLocalTranscribing = true;
           try {
-            await transcribeLocalMeetingChunk("system");
-            await transcribeLocalMeetingChunk("mic");
+            if (system) await transcribeLocalMeetingChunk("system");
+            if (mic) await transcribeLocalMeetingChunk("mic");
           } finally {
             meetingLocalTranscribing = false;
           }
@@ -4602,6 +4757,10 @@ class IPCHandlers {
       meetingNoteId = null;
       meetingLocalMode = false;
       meetingLocalBuffers = { mic: [], system: [] };
+      meetingLocalRetryAt = 0;
+      meetingLocalRetryDelayMs = 0;
+      meetingLocalLastErrorToastAt = 0;
+      meetingLocalHalted = null;
       if (meetingDiarizationStream) {
         meetingDiarizationStream.end();
         meetingDiarizationStream = null;
@@ -4879,6 +5038,8 @@ class IPCHandlers {
         meetingLocalProvider = "voicelab";
         meetingLocalModel = "voicelab-cloud";
         meetingLocalLanguage = options.language || null;
+        meetingLocalSegmentProfile =
+          options.mode === "dictation" ? DICTATION_SEGMENT_PROFILE : MEETING_SEGMENT_PROFILE;
         meetingLocalWin = BrowserWindow.fromWebContents(event.sender);
         meetingLocalBuffers = { mic: [], system: [] };
         meetingLocalTranscript = "";
@@ -4886,9 +5047,10 @@ class IPCHandlers {
         await startLiveSpeakerIdentification(meetingLocalWin, systemAudioMode);
         await startMeetingAec(systemAudioMode);
 
-        meetingLocalTimer = setInterval(() => {
-          transcribeAllLocalBuffers();
-        }, LOCAL_MEETING_CHUNK_INTERVAL_MS);
+        meetingLocalHalted = null;
+        meetingLocalRetryAt = 0;
+        meetingLocalRetryDelayMs = 0;
+        meetingLocalTimer = setInterval(flushReadyMeetingSegments, LOCAL_MEETING_FLUSH_POLL_MS);
 
         ({ systemAudioMode, systemAudioStrategy } = await startMeetingSystemAudio(
           event,
@@ -5110,6 +5272,50 @@ class IPCHandlers {
       flushPendingMeetingMicChunks(true);
     };
 
+    // The dictation island's meeting-notes card: what is happening now and the
+    // next step. Read-only state plus three navigation actions; no audio here.
+    this._handle("island-meeting-state", async () => {
+      let calendarConnected = false;
+      let nextEvent = null;
+      try {
+        calendarConnected = this.googleCalendarManager?.getConnectionStatus?.().connected === true;
+      } catch {
+        calendarConnected = false;
+      }
+      try {
+        const upcoming = this.databaseManager.getUpcomingEvents(90)?.[0];
+        if (upcoming?.id) {
+          nextEvent = {
+            id: String(upcoming.id),
+            summary: String(upcoming.summary || "").slice(0, 120),
+            startTime: upcoming.start_time || null,
+            endTime: upcoming.end_time || null,
+          };
+        }
+      } catch {
+        nextEvent = null;
+      }
+      return { recording: meetingLocalMode, calendarConnected, nextEvent };
+    });
+    this._handle("island-start-meeting", async () => {
+      if (!this.meetingDetectionEngine) return { success: false, error: "Meetings unavailable" };
+      if (meetingLocalMode) {
+        await this.windowManager.createControlPanelWindow();
+        return { success: true, alreadyRecording: true };
+      }
+      await this.meetingDetectionEngine.startManualMeeting();
+      return { success: true };
+    });
+    this._handle("island-open-notes", async () => {
+      await this.windowManager.createControlPanelWindow();
+      return { success: true };
+    });
+    this._handle("island-open-integrations", async () => {
+      await this.windowManager.createControlPanelWindow();
+      this.windowManager.sendToControlPanel("show-integrations");
+      return { success: true };
+    });
+
     this._handle("meeting-transcription-set-system-audio-enabled", async (_event, enabled) => {
       meetingSystemAudioCaptureEnabled = enabled !== false;
       if (meetingConnectionOptions) {
@@ -5282,10 +5488,15 @@ class IPCHandlers {
       return { success: true };
     });
 
-    this._handle("complete-dictation-preview", async (_event, { text } = {}) => {
+    this._handle("complete-dictation-preview", async (_event, { text, durationMs } = {}) => {
       const completedText = typeof text === "string" ? text.trim() : "";
+      const completedDurationMs =
+        Number.isFinite(durationMs) && durationMs > 0 ? Math.round(durationMs) : null;
       if (completedText) {
-        this.broadcastToWindows("dictation-complete", { text: completedText });
+        this.broadcastToWindows("dictation-complete", {
+          text: completedText,
+          durationMs: completedDurationMs,
+        });
       }
       if (!dictationPreviewSessionActive) {
         return { success: true };
