@@ -7,7 +7,7 @@ const debugLogger = require("./debugLogger");
 const MAX_URL_LENGTH = 4096;
 
 function getAllowedRendererLocation() {
-  if (process.env.NODE_ENV === "development") {
+  if (DevServerManager.isDevelopment()) {
     return {
       kind: "development",
       origin: new URL(DevServerManager.DEV_SERVER_URL).origin,

@@ -17,6 +17,13 @@ const DEV_SERVER_PORT = parseDevServerPort();
 const DEV_SERVER_URL = `http://localhost:${DEV_SERVER_PORT}/`;
 
 class DevServerManager {
+  static isDevelopment() {
+    const { app } = require("electron");
+    // A packaged app must use its bundled renderer even if its launcher or
+    // a saved profile supplies NODE_ENV=development.
+    return !app.isPackaged && process.env.NODE_ENV === "development";
+  }
+
   static async waitForDevServer(url = DEV_SERVER_URL, maxAttempts = 30, delay = 1000) {
     for (let i = 0; i < maxAttempts; i++) {
       try {
@@ -55,7 +62,7 @@ class DevServerManager {
   }
 
   static getAppUrl(isControlPanel = false) {
-    if (process.env.NODE_ENV === "development") {
+    if (this.isDevelopment()) {
       if (!isControlPanel) return DEV_SERVER_URL;
 
       const previewProgress = process.env.VOICELAB_UPDATE_PROGRESS_PREVIEW;
@@ -75,7 +82,7 @@ class DevServerManager {
    * @returns {{ path: string, query: object } | null} - Path info for loadFile() or null for dev
    */
   static getAppFilePath(isControlPanel = false) {
-    if (process.env.NODE_ENV === "development") {
+    if (this.isDevelopment()) {
       return null; // Use getAppUrl() for dev server
     }
 

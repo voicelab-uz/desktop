@@ -169,7 +169,7 @@ class WindowManager {
           return;
         }
         if (
-          process.env.NODE_ENV === "development" &&
+          DevServerManager.isDevelopment() &&
           validatedURL &&
           validatedURL.includes(`localhost:${DEV_SERVER_PORT}`)
         ) {
@@ -334,7 +334,7 @@ class WindowManager {
   }
 
   async _loadWindowContent(window, isControlPanel = false, isAgent = false) {
-    if (process.env.NODE_ENV === "development") {
+    if (DevServerManager.isDevelopment()) {
       let appUrl = DevServerManager.getAppUrl(isControlPanel);
       if (isAgent) {
         appUrl = `${DevServerManager.getAppUrl(false)}?agent=true`;
@@ -852,7 +852,7 @@ class WindowManager {
           return;
         }
         clearVisibilityTimer();
-        if (process.env.NODE_ENV !== "development") {
+        if (!DevServerManager.isDevelopment()) {
           this.showLoadFailureDialog("Control panel", errorCode, errorDescription, validatedURL);
         }
         if (!this.controlPanelWindow.isVisible()) {
@@ -980,7 +980,7 @@ class WindowManager {
       this.transcriptionPreviewWindow = null;
     });
 
-    if (process.env.NODE_ENV === "development") {
+    if (DevServerManager.isDevelopment()) {
       await DevServerManager.waitForDevServer();
       await this.transcriptionPreviewWindow.loadURL(
         `${DevServerManager.DEV_SERVER_URL}?transcription-preview=true`
@@ -1367,7 +1367,7 @@ class WindowManager {
 
     this._pendingNotificationData = promptData;
 
-    if (process.env.NODE_ENV === "development") {
+    if (DevServerManager.isDevelopment()) {
       await DevServerManager.waitForDevServer();
       await this.notificationWindow.loadURL(
         `${DevServerManager.DEV_SERVER_URL}?meeting-notification=true`
@@ -1434,7 +1434,7 @@ class WindowManager {
     });
 
     try {
-      if (process.env.NODE_ENV === "development") {
+      if (DevServerManager.isDevelopment()) {
         await DevServerManager.waitForDevServer();
         await window.loadURL(`${DevServerManager.DEV_SERVER_URL}?accessibility-drop=true`);
       } else {
